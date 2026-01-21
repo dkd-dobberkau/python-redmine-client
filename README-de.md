@@ -1,14 +1,14 @@
 # Redmine Client
 
-Python client for the Redmine REST API with synchronous and asynchronous support.
+Python-Client für die Redmine REST-API mit Unterstützung für synchrone und asynchrone Operationen.
 
 ## Features
 
-- Synchronous and asynchronous client
-- Full type hints with Pydantic models
-- Custom fields support
-- Automatic pagination
-- Context manager support
+- Synchroner und asynchroner Client
+- Vollständige Typisierung mit Pydantic-Modellen
+- Custom Fields Unterstützung
+- Automatische Paginierung
+- Context Manager Support
 
 ## Installation
 
@@ -16,34 +16,34 @@ Python client for the Redmine REST API with synchronous and asynchronous support
 pip install redmine-client
 ```
 
-Or for development:
+Oder für Entwicklung:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Usage
+## Verwendung
 
-### Synchronous
+### Synchron
 
 ```python
 from redmine_client import RedmineClient
 
 with RedmineClient("https://redmine.example.com", "your-api-key") as client:
-    # Get all open issues assigned to me
+    # Alle mir zugewiesenen offenen Issues
     issues = client.get_issues(assigned_to_id="me", status_id="open")
 
     for issue in issues:
         print(f"#{issue.id}: {issue.subject}")
 
-    # Update issue with custom field
+    # Issue mit Custom Field aktualisieren
     client.update_issue(
         issue_id=123,
         custom_fields=[{"id": 42, "value": "2026-KW03-KW04"}]
     )
 ```
 
-### Asynchronous
+### Asynchron
 
 ```python
 from redmine_client import AsyncRedmineClient
@@ -60,71 +60,71 @@ async with AsyncRedmineClient("https://redmine.example.com", "your-api-key") as 
 ### Issues
 
 ```python
-# Get issues
+# Issues abrufen
 issues = client.get_issues(
-    project_id="myproject",      # Optional: filter by project
-    assigned_to_id="me",         # Optional: filter by assignee
-    status_id="open",            # Optional: "open", "closed", "*", or ID
+    project_id="myproject",      # Optional: Filter nach Projekt
+    assigned_to_id="me",         # Optional: Filter nach Zuweisung
+    status_id="open",            # Optional: "open", "closed", "*", oder ID
     tracker_id=1,                # Optional: Bug, Feature, etc.
 )
 
-# Get single issue
+# Einzelnes Issue
 issue = client.get_issue(123, include_journals=True)
 
-# Create issue
+# Issue erstellen
 new_issue = client.create_issue(
     project_id="myproject",
-    subject="New feature",
-    description="Description...",
+    subject="Neues Feature",
+    description="Beschreibung...",
     tracker_id=2,
-    custom_fields=[{"id": 42, "value": "Sprint value"}]
+    custom_fields=[{"id": 42, "value": "Sprint-Wert"}]
 )
 
-# Update issue
+# Issue aktualisieren
 client.update_issue(
     issue_id=123,
-    subject="New subject",
-    notes="Add a comment",
-    custom_fields=[{"id": 42, "value": "New value"}]
+    subject="Neuer Betreff",
+    notes="Kommentar hinzufügen",
+    custom_fields=[{"id": 42, "value": "Neuer Wert"}]
 )
 
-# Add comment
-client.add_issue_note(123, "My comment")
+# Kommentar hinzufügen
+client.add_issue_note(123, "Mein Kommentar")
 ```
 
 ### Custom Fields
 
 ```python
-# Get all custom fields (requires admin rights)
+# Alle Custom Fields abrufen (benötigt Admin-Rechte)
 fields = client.get_custom_fields()
 
-# Get issue custom fields only
+# Nur Issue Custom Fields
 issue_fields = client.get_issue_custom_fields()
 
-# Find custom field by name
+# Custom Field nach Namen suchen
 sprint_field = client.find_custom_field_by_name("Sprint")
 
-# Read custom field value from issue
+# Custom Field Wert aus Issue lesen
 issue = client.get_issue(123)
 sprint = issue.get_custom_field("Sprint")
 ```
 
-### Projects
+### Projekte
 
 ```python
 projects = client.get_projects(include_closed=False)
 project = client.get_project("myproject")
 ```
 
-### Users
+### Benutzer
 
 ```python
 current_user = client.get_current_user()
-users = client.get_users(status=1)  # 1 = active
+users = client.get_users(status=1)  # 1 = aktiv
 user = client.get_user(42)
 ```
 
-### Enumerations
+### Enumerationen
 
 ```python
 trackers = client.get_trackers()
@@ -133,18 +133,18 @@ priorities = client.get_issue_priorities()
 activities = client.get_time_entry_activities()
 ```
 
-## Models
+## Modelle
 
-All responses are returned as Pydantic models:
+Alle Antworten werden als Pydantic-Modelle zurückgegeben:
 
 - `RedmineIssue` - Issue/Ticket
-- `RedmineProject` - Project
-- `RedmineUser` - User
-- `RedmineTimeEntry` - Time entry
-- `RedmineCustomField` - Custom field value
-- `RedmineCustomFieldDefinition` - Custom field definition
+- `RedmineProject` - Projekt
+- `RedmineUser` - Benutzer
+- `RedmineTimeEntry` - Zeitbuchung
+- `RedmineCustomField` - Custom Field Wert
+- `RedmineCustomFieldDefinition` - Custom Field Definition
 
-## Error Handling
+## Fehlerbehandlung
 
 ```python
 from redmine_client import (
@@ -157,15 +157,15 @@ from redmine_client import (
 try:
     issue = client.get_issue(99999)
 except RedmineNotFoundError:
-    print("Issue not found")
+    print("Issue nicht gefunden")
 except RedmineAuthenticationError:
-    print("Invalid API key")
+    print("API-Key ungültig")
 except RedmineValidationError as e:
-    print(f"Validation error: {e.response}")
+    print(f"Validierungsfehler: {e.response}")
 except RedmineError as e:
-    print(f"Redmine error: {e}")
+    print(f"Redmine-Fehler: {e}")
 ```
 
-## License
+## Lizenz
 
 MIT

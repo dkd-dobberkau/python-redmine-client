@@ -5,7 +5,7 @@ description = "Python client for the Redmine REST API with sync and async suppor
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "Olivier", email = "olivier@example.com" }]
+authors = [{ name = "Olivier Dobberkau", email = "olivier.dobberkau@dkd.de" }]
 keywords = ["redmine", "api", "client", "rest", "async"]
 classifiers = [
     "Development Status :: 4 - Beta",
