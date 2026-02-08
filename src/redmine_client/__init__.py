@@ -37,6 +37,7 @@ from .models import (
     RedmineRelation,
     RedmineTimeEntry,
     RedmineUser,
+    RedmineWikiPage,
 )
 
 __version__ = "0.1.0"
@@ -63,4 +64,5 @@ __all__ = [
     "RedmineRelation",
     "RedmineChangeset",
     "RedmineAllowedStatus",
+    "RedmineWikiPage",
 ]

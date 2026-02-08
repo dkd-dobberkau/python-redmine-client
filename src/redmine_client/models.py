@@ -385,5 +385,48 @@ class RedmineIssue(BaseModel):
         return None
 
 
+class RedmineWikiPage(BaseModel):
+    """Redmine Wiki-Seite."""
+
+    title: str = ""
+    text: str | None = None
+    version: int | None = None
+    author_id: int | None = None
+    author_name: str | None = None
+    comments: str | None = None
+    created_on: str | None = None
+    updated_on: str | None = None
+    parent_title: str | None = None
+    attachments: list[RedmineAttachment] | None = None
+
+    model_config = {"extra": "ignore"}
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> RedmineWikiPage:
+        """Erstellt RedmineWikiPage aus API-Response."""
+        author = data.get("author", {})
+        parent = data.get("parent", {})
+
+        attachments = None
+        if "attachments" in data:
+            attachments = [
+                RedmineAttachment.from_api_response(a)
+                for a in data["attachments"]
+            ]
+
+        return cls(
+            title=data.get("title", ""),
+            text=data.get("text"),
+            version=data.get("version"),
+            author_id=author.get("id"),
+            author_name=author.get("name"),
+            comments=data.get("comments"),
+            created_on=data.get("created_on"),
+            updated_on=data.get("updated_on"),
+            parent_title=parent.get("title"),
+            attachments=attachments,
+        )
+
+
 # Self-Referenz für children auflösen
 RedmineIssue.model_rebuild()

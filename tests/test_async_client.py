@@ -318,3 +318,74 @@ class TestAsyncIncludeParameters:
 
         assert issue.children is not None
         assert issue.children[0].id == 201
+
+
+class TestAsyncWiki:
+    """Tests für async Wiki-Operationen."""
+
+    @pytest.mark.asyncio
+    async def test_get_wiki_pages(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seitenübersicht wird abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "wiki_pages": [
+                    {"title": "Start", "version": 3},
+                    {"title": "FAQ", "version": 1},
+                ]
+            }
+        )
+
+        pages = await async_client.get_wiki_pages("my-project")
+
+        assert len(pages) == 2
+        assert pages[0].title == "Start"
+
+    @pytest.mark.asyncio
+    async def test_get_wiki_page(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Einzelne Wiki-Seite wird abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "wiki_page": {
+                    "title": "Start",
+                    "text": "Inhalt",
+                    "version": 5,
+                    "author": {"id": 1, "name": "Admin"},
+                }
+            }
+        )
+
+        page = await async_client.get_wiki_page("my-project", "Start")
+
+        assert page.title == "Start"
+        assert page.text == "Inhalt"
+        assert page.author_name == "Admin"
+
+    @pytest.mark.asyncio
+    async def test_create_or_update_wiki_page(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seite wird erstellt/aktualisiert."""
+        httpx_mock.add_response(status_code=204)
+
+        await async_client.create_or_update_wiki_page(
+            "my-project", "NewPage", "Inhalt", comments="Erstellt"
+        )
+
+        request = httpx_mock.get_request()
+        assert b'"text"' in request.content
+
+    @pytest.mark.asyncio
+    async def test_delete_wiki_page(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seite wird gelöscht."""
+        httpx_mock.add_response(status_code=204)
+
+        await async_client.delete_wiki_page("my-project", "OldPage")
+
+        request = httpx_mock.get_request()
+        assert request.method == "DELETE"

@@ -27,6 +27,7 @@ from .models import (
     RedmineProject,
     RedmineTimeEntry,
     RedmineUser,
+    RedmineWikiPage,
 )
 
 logger = logging.getLogger(__name__)
@@ -477,3 +478,76 @@ class RedmineClient:
         """Ruft verfügbare Aktivitätstypen ab."""
         response = self._get("/enumerations/time_entry_activities.json")
         return response.get("time_entry_activities", [])
+
+    # === Wiki ===
+
+    def get_wiki_pages(self, project_id: int | str) -> list[RedmineWikiPage]:
+        """
+        Ruft die Wiki-Seitenübersicht eines Projekts ab.
+
+        Args:
+            project_id: Projekt-ID oder Identifier
+        """
+        response = self._get(f"/projects/{project_id}/wiki/index.json")
+        return [
+            RedmineWikiPage.from_api_response(w)
+            for w in response.get("wiki_pages", [])
+        ]
+
+    def get_wiki_page(
+        self,
+        project_id: int | str,
+        title: str,
+        include_attachments: bool = False,
+    ) -> RedmineWikiPage:
+        """
+        Ruft eine Wiki-Seite ab.
+
+        Args:
+            project_id: Projekt-ID oder Identifier
+            title: Seitentitel
+            include_attachments: Inklusive Dateianhänge
+        """
+        params: dict[str, Any] = {}
+        if include_attachments:
+            params["include"] = "attachments"
+
+        response = self._get(
+            f"/projects/{project_id}/wiki/{title}.json", params=params
+        )
+        return RedmineWikiPage.from_api_response(response.get("wiki_page", {}))
+
+    def create_or_update_wiki_page(
+        self,
+        project_id: int | str,
+        title: str,
+        text: str,
+        comments: str | None = None,
+    ) -> None:
+        """
+        Erstellt oder aktualisiert eine Wiki-Seite.
+
+        Args:
+            project_id: Projekt-ID oder Identifier
+            title: Seitentitel
+            text: Wiki-Inhalt (Textile/Markdown)
+            comments: Änderungskommentar
+        """
+        wiki_data: dict[str, Any] = {"text": text}
+        if comments is not None:
+            wiki_data["comments"] = comments
+
+        self._put(
+            f"/projects/{project_id}/wiki/{title}.json",
+            json={"wiki_page": wiki_data},
+        )
+
+    def delete_wiki_page(self, project_id: int | str, title: str) -> None:
+        """
+        Löscht eine Wiki-Seite.
+
+        Args:
+            project_id: Projekt-ID oder Identifier
+            title: Seitentitel
+        """
+        self._delete(f"/projects/{project_id}/wiki/{title}.json")

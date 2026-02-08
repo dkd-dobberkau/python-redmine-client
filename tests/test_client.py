@@ -704,3 +704,129 @@ class TestIncludeParameters:
         assert len(issue.children) == 1
         assert issue.children[0].id == 201
         assert issue.children[0].subject == "Child Issue"
+
+
+class TestWiki:
+    """Tests für Wiki-Operationen."""
+
+    def test_get_wiki_pages(self, client: RedmineClient, httpx_mock: HTTPXMock):
+        """Wiki-Seitenübersicht wird abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "wiki_pages": [
+                    {"title": "Start", "version": 3, "created_on": "2026-01-01T10:00:00Z"},
+                    {"title": "FAQ", "version": 1, "created_on": "2026-01-05T12:00:00Z"},
+                ]
+            }
+        )
+
+        pages = client.get_wiki_pages("my-project")
+
+        assert len(pages) == 2
+        assert pages[0].title == "Start"
+        assert pages[1].title == "FAQ"
+
+    def test_get_wiki_page(self, client: RedmineClient, httpx_mock: HTTPXMock):
+        """Einzelne Wiki-Seite wird abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "wiki_page": {
+                    "title": "Start",
+                    "text": "h1. Willkommen\n\nInhalt der Startseite.",
+                    "version": 5,
+                    "author": {"id": 1, "name": "Admin"},
+                    "comments": "Aktualisiert",
+                    "created_on": "2026-01-01T10:00:00Z",
+                    "updated_on": "2026-01-20T14:00:00Z",
+                }
+            }
+        )
+
+        page = client.get_wiki_page("my-project", "Start")
+
+        assert page.title == "Start"
+        assert page.text is not None
+        assert "Willkommen" in page.text
+        assert page.version == 5
+        assert page.author_name == "Admin"
+
+    def test_get_wiki_page_with_attachments(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seite mit Attachments wird korrekt geparst."""
+        httpx_mock.add_response(
+            json={
+                "wiki_page": {
+                    "title": "Docs",
+                    "text": "Dokumentation",
+                    "version": 1,
+                    "author": {"id": 1, "name": "Admin"},
+                    "attachments": [
+                        {
+                            "id": 50,
+                            "filename": "diagram.png",
+                            "filesize": 54321,
+                            "content_type": "image/png",
+                            "author": {"id": 1, "name": "Admin"},
+                            "created_on": "2026-01-20T10:00:00Z",
+                        }
+                    ],
+                }
+            }
+        )
+
+        page = client.get_wiki_page("my-project", "Docs", include_attachments=True)
+
+        assert page.attachments is not None
+        assert len(page.attachments) == 1
+        assert page.attachments[0].filename == "diagram.png"
+
+        request = httpx_mock.get_request()
+        assert "include=attachments" in str(request.url)
+
+    def test_get_wiki_page_with_parent(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seite mit Parent wird korrekt geparst."""
+        httpx_mock.add_response(
+            json={
+                "wiki_page": {
+                    "title": "SubPage",
+                    "text": "Unterseite",
+                    "version": 1,
+                    "author": {"id": 1, "name": "Admin"},
+                    "parent": {"title": "Start"},
+                }
+            }
+        )
+
+        page = client.get_wiki_page("my-project", "SubPage")
+
+        assert page.parent_title == "Start"
+
+    def test_create_or_update_wiki_page(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Wiki-Seite wird erstellt/aktualisiert."""
+        httpx_mock.add_response(status_code=204)
+
+        client.create_or_update_wiki_page(
+            "my-project", "NewPage", "Neuer Inhalt", comments="Erstellt"
+        )
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert b'"text"' in request.content
+        assert b"Neuer Inhalt" in request.content
+        assert b'"comments"' in request.content
+
+    def test_delete_wiki_page(self, client: RedmineClient, httpx_mock: HTTPXMock):
+        """Wiki-Seite wird gelöscht."""
+        httpx_mock.add_response(status_code=204)
+
+        client.delete_wiki_page("my-project", "OldPage")
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert request.method == "DELETE"
+        assert "/wiki/OldPage.json" in str(request.url)
