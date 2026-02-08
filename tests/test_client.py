@@ -241,6 +241,129 @@ class TestIssues:
         assert request is not None
         assert b'"custom_fields"' in request.content
 
+    def test_get_issue_with_journals(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Issue mit Journals wird korrekt geparst."""
+        httpx_mock.add_response(
+            json={
+                "issue": {
+                    "id": 100,
+                    "subject": "Issue mit Historie",
+                    "project": {"id": 1, "name": "Project A"},
+                    "tracker": {"id": 1, "name": "Bug"},
+                    "status": {"id": 2, "name": "In Progress"},
+                    "priority": {"id": 2, "name": "Normal"},
+                    "author": {"id": 1, "name": "Test User"},
+                    "journals": [
+                        {
+                            "id": 1,
+                            "user": {"id": 1, "name": "Test User"},
+                            "notes": "Erster Kommentar",
+                            "created_on": "2026-01-15T10:00:00Z",
+                            "private_notes": False,
+                            "details": [],
+                        },
+                        {
+                            "id": 2,
+                            "user": {"id": 2, "name": "Admin"},
+                            "notes": "",
+                            "created_on": "2026-01-16T14:30:00Z",
+                            "private_notes": False,
+                            "details": [
+                                {
+                                    "property": "attr",
+                                    "name": "status_id",
+                                    "old_value": "1",
+                                    "new_value": "2",
+                                },
+                                {
+                                    "property": "attr",
+                                    "name": "assigned_to_id",
+                                    "old_value": None,
+                                    "new_value": "3",
+                                },
+                            ],
+                        },
+                    ],
+                }
+            }
+        )
+
+        issue = client.get_issue(100, include_journals=True)
+
+        assert issue.id == 100
+        assert issue.journals is not None
+        assert len(issue.journals) == 2
+
+        # Erster Journal-Eintrag: Kommentar
+        j1 = issue.journals[0]
+        assert j1.id == 1
+        assert j1.user_name == "Test User"
+        assert j1.notes == "Erster Kommentar"
+        assert j1.created_on == "2026-01-15T10:00:00Z"
+        assert len(j1.details) == 0
+
+        # Zweiter Journal-Eintrag: Statusänderung
+        j2 = issue.journals[1]
+        assert j2.id == 2
+        assert j2.user_name == "Admin"
+        assert len(j2.details) == 2
+        assert j2.details[0].property == "attr"
+        assert j2.details[0].name == "status_id"
+        assert j2.details[0].old_value == "1"
+        assert j2.details[0].new_value == "2"
+        assert j2.details[1].name == "assigned_to_id"
+        assert j2.details[1].old_value is None
+        assert j2.details[1].new_value == "3"
+
+    def test_get_issue_without_journals(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Issue ohne Journals hat journals=None."""
+        httpx_mock.add_response(
+            json={
+                "issue": {
+                    "id": 101,
+                    "subject": "Issue ohne Journals",
+                    "project": {"id": 1, "name": "Project A"},
+                    "tracker": {"id": 1, "name": "Bug"},
+                    "status": {"id": 1, "name": "New"},
+                    "priority": {"id": 2, "name": "Normal"},
+                    "author": {"id": 1, "name": "Test User"},
+                }
+            }
+        )
+
+        issue = client.get_issue(101)
+
+        assert issue.journals is None
+
+    def test_get_issue_include_journals_sends_param(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """include_journals sendet den richtigen Query-Parameter."""
+        httpx_mock.add_response(
+            json={
+                "issue": {
+                    "id": 102,
+                    "subject": "Test",
+                    "project": {"id": 1, "name": "P"},
+                    "tracker": {"id": 1, "name": "Bug"},
+                    "status": {"id": 1, "name": "New"},
+                    "priority": {"id": 2, "name": "Normal"},
+                    "author": {"id": 1, "name": "User"},
+                    "journals": [],
+                }
+            }
+        )
+
+        client.get_issue(102, include_journals=True)
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert "include=journals" in str(request.url)
+
     def test_add_issue_note(self, client: RedmineClient, httpx_mock: HTTPXMock):
         """Kommentar wird zu Issue hinzugefügt."""
         httpx_mock.add_response(status_code=204)

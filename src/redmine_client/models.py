@@ -119,6 +119,46 @@ class RedmineTimeEntry(BaseModel):
         )
 
 
+class RedmineJournalDetail(BaseModel):
+    """Einzelne Änderung innerhalb eines Journal-Eintrags."""
+
+    property: str  # "attr", "cf", "attachment", "relation"
+    name: str  # Feldname (z.B. "status_id", "assigned_to_id")
+    old_value: str | None = None
+    new_value: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class RedmineJournal(BaseModel):
+    """Journal-Eintrag (Kommentar/Änderung) eines Issues."""
+
+    id: int
+    user_id: int | None = None
+    user_name: str | None = None
+    notes: str | None = None
+    created_on: str | None = None
+    private_notes: bool = False
+    details: list[RedmineJournalDetail] = Field(default_factory=list)
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> "RedmineJournal":
+        """Erstellt RedmineJournal aus API-Response."""
+        user = data.get("user", {})
+        details = [
+            RedmineJournalDetail(**d) for d in data.get("details", [])
+        ]
+        return cls(
+            id=data.get("id", 0),
+            user_id=user.get("id"),
+            user_name=user.get("name"),
+            notes=data.get("notes"),
+            created_on=data.get("created_on"),
+            private_notes=data.get("private_notes", False),
+            details=details,
+        )
+
+
 class RedmineIssue(BaseModel):
     """Redmine Issue/Ticket."""
 
@@ -143,6 +183,7 @@ class RedmineIssue(BaseModel):
     created_on: str | None = None
     updated_on: str | None = None
     custom_fields: list[RedmineCustomField] | None = None
+    journals: list[RedmineJournal] | None = None
 
     @classmethod
     def from_api_response(cls, data: dict) -> "RedmineIssue":
@@ -159,6 +200,13 @@ class RedmineIssue(BaseModel):
         if "custom_fields" in data:
             custom_fields = [
                 RedmineCustomField(**cf) for cf in data["custom_fields"]
+            ]
+
+        # Journals parsen
+        journals = None
+        if "journals" in data:
+            journals = [
+                RedmineJournal.from_api_response(j) for j in data["journals"]
             ]
 
         return cls(
@@ -183,6 +231,7 @@ class RedmineIssue(BaseModel):
             created_on=data.get("created_on"),
             updated_on=data.get("updated_on"),
             custom_fields=custom_fields,
+            journals=journals,
         )
 
     def get_custom_field(self, name: str) -> str | list[str] | None:
