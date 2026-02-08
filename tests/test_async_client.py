@@ -1,5 +1,7 @@
 """Tests für den asynchronen AsyncRedmineClient."""
 
+import warnings
+
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -219,3 +221,100 @@ class TestAsyncPagination:
         issues = await async_client.get_issues()
 
         assert len(issues) == 150
+
+
+class TestAsyncIncludeParameters:
+    """Tests für erweiterte Include-Parameter (async)."""
+
+    def _issue_response(self, **extra):
+        base = {
+            "id": 200,
+            "subject": "Include Test",
+            "project": {"id": 1, "name": "P"},
+            "tracker": {"id": 1, "name": "Bug"},
+            "status": {"id": 1, "name": "New"},
+            "priority": {"id": 2, "name": "Normal"},
+            "author": {"id": 1, "name": "User"},
+        }
+        base.update(extra)
+        return {"issue": base}
+
+    @pytest.mark.asyncio
+    async def test_include_list_sends_correct_param(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Include-Liste sendet korrekten Query-Parameter."""
+        httpx_mock.add_response(json=self._issue_response())
+
+        await async_client.get_issue(200, include=["journals", "attachments"])
+
+        request = httpx_mock.get_request()
+        url_str = str(request.url)
+        assert "journals" in url_str
+        assert "attachments" in url_str
+
+    @pytest.mark.asyncio
+    async def test_include_journals_deprecated(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """include_journals erzeugt DeprecationWarning."""
+        httpx_mock.add_response(json=self._issue_response(journals=[]))
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            await async_client.get_issue(200, include_journals=True)
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+
+    @pytest.mark.asyncio
+    async def test_attachments_parsed(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachments werden korrekt geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                attachments=[
+                    {
+                        "id": 10,
+                        "filename": "doc.pdf",
+                        "filesize": 12345,
+                        "content_type": "application/pdf",
+                        "author": {"id": 1, "name": "Test User"},
+                        "created_on": "2026-01-20T10:00:00Z",
+                    }
+                ]
+            )
+        )
+
+        issue = await async_client.get_issue(200, include=["attachments"])
+
+        assert issue.attachments is not None
+        assert len(issue.attachments) == 1
+        assert issue.attachments[0].filename == "doc.pdf"
+
+    @pytest.mark.asyncio
+    async def test_children_parsed(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Children werden rekursiv geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                children=[
+                    {
+                        "id": 201,
+                        "subject": "Child",
+                        "project": {"id": 1, "name": "P"},
+                        "tracker": {"id": 1, "name": "Bug"},
+                        "status": {"id": 1, "name": "New"},
+                        "priority": {"id": 2, "name": "Normal"},
+                        "author": {"id": 1, "name": "User"},
+                    }
+                ]
+            )
+        )
+
+        issue = await async_client.get_issue(200, include=["children"])
+
+        assert issue.children is not None
+        assert issue.children[0].id == 201

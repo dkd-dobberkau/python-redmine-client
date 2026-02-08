@@ -1,5 +1,7 @@
 """Tests für den synchronen RedmineClient."""
 
+import warnings
+
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -484,3 +486,221 @@ class TestPagination:
         assert len(issues) == 150
         assert issues[0].id == 1
         assert issues[149].id == 150
+
+
+class TestIncludeParameters:
+    """Tests für erweiterte Include-Parameter."""
+
+    def _issue_response(self, **extra):
+        """Hilfsmethode für Issue-Response mit optionalen Include-Daten."""
+        base = {
+            "id": 200,
+            "subject": "Include Test",
+            "project": {"id": 1, "name": "P"},
+            "tracker": {"id": 1, "name": "Bug"},
+            "status": {"id": 1, "name": "New"},
+            "priority": {"id": 2, "name": "Normal"},
+            "author": {"id": 1, "name": "User"},
+        }
+        base.update(extra)
+        return {"issue": base}
+
+    def test_include_list_sends_correct_param(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Include-Liste sendet korrekten Query-Parameter."""
+        httpx_mock.add_response(json=self._issue_response())
+
+        client.get_issue(200, include=["journals", "attachments", "relations"])
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        url_str = str(request.url)
+        assert "include=" in url_str
+        assert "journals" in url_str
+        assert "attachments" in url_str
+        assert "relations" in url_str
+
+    def test_include_journals_deprecated_warning(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """include_journals erzeugt DeprecationWarning."""
+        httpx_mock.add_response(json=self._issue_response(journals=[]))
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            client.get_issue(200, include_journals=True)
+
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "deprecated" in str(w[0].message).lower()
+
+    def test_include_journals_merges_with_include(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """include_journals wird mit include-Liste gemergt ohne Duplikate."""
+        httpx_mock.add_response(json=self._issue_response(journals=[]))
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            client.get_issue(
+                200,
+                include=["journals", "attachments"],
+                include_journals=True,
+            )
+
+        request = httpx_mock.get_request()
+        url_str = str(request.url)
+        # journals sollte nur einmal vorkommen
+        assert url_str.count("journals") == 1
+        assert "attachments" in url_str
+
+    def test_attachments_parsed(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachments werden korrekt geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                attachments=[
+                    {
+                        "id": 10,
+                        "filename": "doc.pdf",
+                        "filesize": 12345,
+                        "content_type": "application/pdf",
+                        "description": "Ein Dokument",
+                        "content_url": "https://redmine.example.com/attachments/download/10/doc.pdf",
+                        "author": {"id": 1, "name": "Test User"},
+                        "created_on": "2026-01-20T10:00:00Z",
+                    }
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["attachments"])
+
+        assert issue.attachments is not None
+        assert len(issue.attachments) == 1
+        att = issue.attachments[0]
+        assert att.id == 10
+        assert att.filename == "doc.pdf"
+        assert att.filesize == 12345
+        assert att.content_type == "application/pdf"
+        assert att.author_name == "Test User"
+
+    def test_relations_parsed(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Relations werden korrekt geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                relations=[
+                    {
+                        "id": 5,
+                        "issue_id": 200,
+                        "issue_to_id": 201,
+                        "relation_type": "relates",
+                    }
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["relations"])
+
+        assert issue.relations is not None
+        assert len(issue.relations) == 1
+        rel = issue.relations[0]
+        assert rel.id == 5
+        assert rel.issue_to_id == 201
+        assert rel.relation_type == "relates"
+
+    def test_watchers_parsed(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Watchers werden als RedmineUser geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                watchers=[
+                    {"id": 1, "login": "user1", "firstname": "Max", "lastname": "Muster"},
+                    {"id": 2, "login": "user2", "firstname": "Erika", "lastname": "Muster"},
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["watchers"])
+
+        assert issue.watchers is not None
+        assert len(issue.watchers) == 2
+        assert issue.watchers[0].full_name == "Max Muster"
+
+    def test_changesets_parsed(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Changesets werden korrekt geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                changesets=[
+                    {
+                        "revision": "abc123",
+                        "user": {"id": 1, "name": "Dev"},
+                        "comments": "Fix bug #200",
+                        "committed_on": "2026-01-18T09:00:00Z",
+                    }
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["changesets"])
+
+        assert issue.changesets is not None
+        assert len(issue.changesets) == 1
+        cs = issue.changesets[0]
+        assert cs.revision == "abc123"
+        assert cs.user_name == "Dev"
+        assert cs.comments == "Fix bug #200"
+
+    def test_allowed_statuses_parsed(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """AllowedStatuses werden korrekt geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                allowed_statuses=[
+                    {"id": 1, "name": "New", "is_closed": False},
+                    {"id": 5, "name": "Closed", "is_closed": True},
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["allowed_statuses"])
+
+        assert issue.allowed_statuses is not None
+        assert len(issue.allowed_statuses) == 2
+        assert issue.allowed_statuses[0].name == "New"
+        assert issue.allowed_statuses[1].is_closed is True
+
+    def test_children_parsed_recursively(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Children werden rekursiv als RedmineIssue geparst."""
+        httpx_mock.add_response(
+            json=self._issue_response(
+                children=[
+                    {
+                        "id": 201,
+                        "subject": "Child Issue",
+                        "project": {"id": 1, "name": "P"},
+                        "tracker": {"id": 1, "name": "Bug"},
+                        "status": {"id": 1, "name": "New"},
+                        "priority": {"id": 2, "name": "Normal"},
+                        "author": {"id": 1, "name": "User"},
+                    }
+                ]
+            )
+        )
+
+        issue = client.get_issue(200, include=["children"])
+
+        assert issue.children is not None
+        assert len(issue.children) == 1
+        assert issue.children[0].id == 201
+        assert issue.children[0].subject == "Child Issue"

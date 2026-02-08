@@ -10,6 +10,7 @@ Beispiel:
 """
 
 import logging
+import warnings
 from datetime import date
 from typing import Any
 
@@ -17,7 +18,6 @@ import httpx
 
 from .exceptions import (
     RedmineAuthenticationError,
-    RedmineError,
     RedmineNotFoundError,
     RedmineValidationError,
 )
@@ -299,17 +299,36 @@ class RedmineClient:
         records = self._paginate("/issues.json", "issues", params, limit)
         return [RedmineIssue.from_api_response(r) for r in records]
 
-    def get_issue(self, issue_id: int, include_journals: bool = False) -> RedmineIssue:
+    def get_issue(
+        self,
+        issue_id: int,
+        include: list[str] | None = None,
+        include_journals: bool = False,
+    ) -> RedmineIssue:
         """
         Ruft einzelnes Issue ab.
 
         Args:
             issue_id: Issue-ID
-            include_journals: Inklusive Kommentar-Historie
+            include: Liste von Include-Optionen, z.B.
+                ["journals", "attachments", "relations", "watchers",
+                 "changesets", "allowed_statuses", "children"]
+            include_journals: Deprecated. Verwende include=["journals"].
         """
-        params = {}
+        includes = list(include) if include else []
+
         if include_journals:
-            params["include"] = "journals"
+            warnings.warn(
+                "include_journals ist deprecated, verwende include=['journals']",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if "journals" not in includes:
+                includes.append("journals")
+
+        params: dict[str, Any] = {}
+        if includes:
+            params["include"] = ",".join(includes)
 
         response = self._get(f"/issues/{issue_id}.json", params=params)
         return RedmineIssue.from_api_response(response.get("issue", {}))

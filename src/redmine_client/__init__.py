@@ -25,12 +25,16 @@ from .exceptions import (
     RedmineValidationError,
 )
 from .models import (
+    RedmineAllowedStatus,
+    RedmineAttachment,
+    RedmineChangeset,
     RedmineCustomField,
     RedmineCustomFieldDefinition,
     RedmineIssue,
     RedmineJournal,
     RedmineJournalDetail,
     RedmineProject,
+    RedmineRelation,
     RedmineTimeEntry,
     RedmineUser,
 )
@@ -55,4 +59,8 @@ __all__ = [
     "RedmineTimeEntry",
     "RedmineCustomField",
     "RedmineCustomFieldDefinition",
+    "RedmineAttachment",
+    "RedmineRelation",
+    "RedmineChangeset",
+    "RedmineAllowedStatus",
 ]

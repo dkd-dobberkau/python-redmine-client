@@ -2,6 +2,8 @@
 Pydantic-Modelle für Redmine API Ressourcen.
 """
 
+from __future__ import annotations
+
 from datetime import date
 from typing import Any
 
@@ -95,7 +97,7 @@ class RedmineTimeEntry(BaseModel):
     updated_on: str | None = None
 
     @classmethod
-    def from_api_response(cls, data: dict) -> "RedmineTimeEntry":
+    def from_api_response(cls, data: dict) -> RedmineTimeEntry:
         """Erstellt RedmineTimeEntry aus API-Response."""
         project = data.get("project", {})
         user = data.get("user", {})
@@ -142,7 +144,7 @@ class RedmineJournal(BaseModel):
     details: list[RedmineJournalDetail] = Field(default_factory=list)
 
     @classmethod
-    def from_api_response(cls, data: dict) -> "RedmineJournal":
+    def from_api_response(cls, data: dict) -> RedmineJournal:
         """Erstellt RedmineJournal aus API-Response."""
         user = data.get("user", {})
         details = [
@@ -157,6 +159,84 @@ class RedmineJournal(BaseModel):
             private_notes=data.get("private_notes", False),
             details=details,
         )
+
+
+class RedmineAttachment(BaseModel):
+    """Redmine Dateianhang."""
+
+    id: int
+    filename: str = ""
+    filesize: int = 0
+    content_type: str | None = None
+    description: str | None = None
+    content_url: str | None = None
+    author_id: int | None = None
+    author_name: str | None = None
+    created_on: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> RedmineAttachment:
+        """Erstellt RedmineAttachment aus API-Response."""
+        author = data.get("author", {})
+        return cls(
+            id=data.get("id", 0),
+            filename=data.get("filename", ""),
+            filesize=data.get("filesize", 0),
+            content_type=data.get("content_type"),
+            description=data.get("description"),
+            content_url=data.get("content_url"),
+            author_id=author.get("id"),
+            author_name=author.get("name"),
+            created_on=data.get("created_on"),
+        )
+
+
+class RedmineRelation(BaseModel):
+    """Redmine Issue-Relation."""
+
+    id: int
+    issue_id: int = 0
+    issue_to_id: int = 0
+    relation_type: str = ""
+    delay: int | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class RedmineChangeset(BaseModel):
+    """Redmine Changeset (VCS-Commit)."""
+
+    revision: str = ""
+    user_id: int | None = None
+    user_name: str | None = None
+    comments: str | None = None
+    committed_on: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> RedmineChangeset:
+        """Erstellt RedmineChangeset aus API-Response."""
+        user = data.get("user", {})
+        return cls(
+            revision=data.get("revision", ""),
+            user_id=user.get("id"),
+            user_name=user.get("name"),
+            comments=data.get("comments"),
+            committed_on=data.get("committed_on"),
+        )
+
+
+class RedmineAllowedStatus(BaseModel):
+    """Erlaubter Status-Übergang für ein Issue."""
+
+    id: int
+    name: str = ""
+    is_closed: bool = False
+
+    model_config = {"extra": "ignore"}
 
 
 class RedmineIssue(BaseModel):
@@ -184,9 +264,15 @@ class RedmineIssue(BaseModel):
     updated_on: str | None = None
     custom_fields: list[RedmineCustomField] | None = None
     journals: list[RedmineJournal] | None = None
+    attachments: list[RedmineAttachment] | None = None
+    relations: list[RedmineRelation] | None = None
+    watchers: list[RedmineUser] | None = None
+    changesets: list[RedmineChangeset] | None = None
+    allowed_statuses: list[RedmineAllowedStatus] | None = None
+    children: list[RedmineIssue] | None = None
 
     @classmethod
-    def from_api_response(cls, data: dict) -> "RedmineIssue":
+    def from_api_response(cls, data: dict) -> RedmineIssue:
         """Erstellt RedmineIssue aus API-Response."""
         project = data.get("project", {})
         tracker = data.get("tracker", {})
@@ -207,6 +293,46 @@ class RedmineIssue(BaseModel):
         if "journals" in data:
             journals = [
                 RedmineJournal.from_api_response(j) for j in data["journals"]
+            ]
+
+        # Attachments parsen
+        attachments = None
+        if "attachments" in data:
+            attachments = [
+                RedmineAttachment.from_api_response(a)
+                for a in data["attachments"]
+            ]
+
+        # Relations parsen
+        relations = None
+        if "relations" in data:
+            relations = [RedmineRelation(**r) for r in data["relations"]]
+
+        # Watchers parsen
+        watchers = None
+        if "watchers" in data:
+            watchers = [RedmineUser(**w) for w in data["watchers"]]
+
+        # Changesets parsen
+        changesets = None
+        if "changesets" in data:
+            changesets = [
+                RedmineChangeset.from_api_response(c)
+                for c in data["changesets"]
+            ]
+
+        # Allowed Statuses parsen
+        allowed_statuses = None
+        if "allowed_statuses" in data:
+            allowed_statuses = [
+                RedmineAllowedStatus(**s) for s in data["allowed_statuses"]
+            ]
+
+        # Children parsen (rekursiv)
+        children = None
+        if "children" in data:
+            children = [
+                RedmineIssue.from_api_response(c) for c in data["children"]
             ]
 
         return cls(
@@ -232,6 +358,12 @@ class RedmineIssue(BaseModel):
             updated_on=data.get("updated_on"),
             custom_fields=custom_fields,
             journals=journals,
+            attachments=attachments,
+            relations=relations,
+            watchers=watchers,
+            changesets=changesets,
+            allowed_statuses=allowed_statuses,
+            children=children,
         )
 
     def get_custom_field(self, name: str) -> str | list[str] | None:
@@ -251,3 +383,7 @@ class RedmineIssue(BaseModel):
             if cf.id == field_id:
                 return cf.value
         return None
+
+
+# Self-Referenz für children auflösen
+RedmineIssue.model_rebuild()
