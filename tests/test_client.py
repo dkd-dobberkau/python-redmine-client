@@ -830,3 +830,153 @@ class TestWiki:
         assert request is not None
         assert request.method == "DELETE"
         assert "/wiki/OldPage.json" in str(request.url)
+
+
+class TestAttachments:
+    """Tests für Attachment-Operationen."""
+
+    def test_upload_file_bytes(self, client: RedmineClient, httpx_mock: HTTPXMock):
+        """Datei-Upload mit Bytes gibt Token zurück."""
+        httpx_mock.add_response(
+            json={"upload": {"token": "abc-123-upload-token"}}
+        )
+
+        token = client.upload_file(b"file content here", filename="test.txt")
+
+        assert token == "abc-123-upload-token"
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert request.headers["Content-Type"] == "application/octet-stream"
+        assert request.content == b"file content here"
+
+    def test_upload_file_from_path(
+        self, client: RedmineClient, httpx_mock: HTTPXMock, tmp_path
+    ):
+        """Datei-Upload von Dateipfad."""
+        test_file = tmp_path / "document.pdf"
+        test_file.write_bytes(b"PDF content")
+
+        httpx_mock.add_response(
+            json={"upload": {"token": "pdf-upload-token"}}
+        )
+
+        token = client.upload_file(test_file)
+
+        assert token == "pdf-upload-token"
+        request = httpx_mock.get_request()
+        assert request.content == b"PDF content"
+        assert "filename=document.pdf" in str(request.url)
+
+    def test_get_attachment(self, client: RedmineClient, httpx_mock: HTTPXMock):
+        """Attachment-Metadaten werden abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "attachment": {
+                    "id": 42,
+                    "filename": "report.pdf",
+                    "filesize": 98765,
+                    "content_type": "application/pdf",
+                    "content_url": "https://redmine.example.com/attachments/download/42/report.pdf",
+                    "author": {"id": 1, "name": "Test User"},
+                    "created_on": "2026-01-20T10:00:00Z",
+                }
+            }
+        )
+
+        att = client.get_attachment(42)
+
+        assert att.id == 42
+        assert att.filename == "report.pdf"
+        assert att.filesize == 98765
+        assert att.content_url is not None
+
+    def test_download_attachment(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachment wird heruntergeladen."""
+        # Erste Anfrage: Metadaten
+        httpx_mock.add_response(
+            json={
+                "attachment": {
+                    "id": 42,
+                    "filename": "report.pdf",
+                    "filesize": 11,
+                    "content_url": "https://redmine.example.com/attachments/download/42/report.pdf",
+                    "author": {"id": 1, "name": "User"},
+                }
+            }
+        )
+        # Zweite Anfrage: Download
+        httpx_mock.add_response(content=b"PDF binary data")
+
+        data = client.download_attachment(42)
+
+        assert data == b"PDF binary data"
+
+    def test_delete_attachment(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachment wird gelöscht."""
+        httpx_mock.add_response(status_code=204)
+
+        client.delete_attachment(42)
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert request.method == "DELETE"
+        assert "/attachments/42.json" in str(request.url)
+
+    def test_create_issue_with_uploads(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Issue mit Uploads wird erstellt."""
+        httpx_mock.add_response(
+            json={
+                "issue": {
+                    "id": 999,
+                    "subject": "Issue mit Anhang",
+                    "project": {"id": 1, "name": "P"},
+                    "tracker": {"id": 1, "name": "Bug"},
+                    "status": {"id": 1, "name": "New"},
+                    "priority": {"id": 2, "name": "Normal"},
+                    "author": {"id": 1, "name": "User"},
+                }
+            }
+        )
+
+        issue = client.create_issue(
+            project_id="my-project",
+            subject="Issue mit Anhang",
+            uploads=[
+                {
+                    "token": "abc-123",
+                    "filename": "test.txt",
+                    "content_type": "text/plain",
+                }
+            ],
+        )
+
+        assert issue.id == 999
+        request = httpx_mock.get_request()
+        assert b'"uploads"' in request.content
+        assert b'"token"' in request.content
+
+    def test_update_issue_with_uploads(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Issue wird mit Uploads aktualisiert."""
+        httpx_mock.add_response(status_code=204)
+
+        client.update_issue(
+            issue_id=123,
+            uploads=[
+                {
+                    "token": "def-456",
+                    "filename": "attachment.pdf",
+                    "content_type": "application/pdf",
+                }
+            ],
+        )
+
+        request = httpx_mock.get_request()
+        assert b'"uploads"' in request.content

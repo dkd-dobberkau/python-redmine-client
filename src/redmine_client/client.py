@@ -12,6 +12,7 @@ Beispiel:
 import logging
 import warnings
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -22,6 +23,7 @@ from .exceptions import (
     RedmineValidationError,
 )
 from .models import (
+    RedmineAttachment,
     RedmineCustomFieldDefinition,
     RedmineIssue,
     RedmineProject,
@@ -147,6 +149,50 @@ class RedmineClient:
     def _delete(self, path: str) -> dict:
         """DELETE-Request."""
         return self._request("DELETE", path)
+
+    def _upload_file(self, file_data: bytes, filename: str) -> dict[str, Any]:
+        """Upload-Request mit octet-stream Content-Type."""
+        logger.debug(f"POST /uploads.json filename={filename}")
+
+        response = self.client.post(
+            "/uploads.json",
+            content=file_data,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Redmine-API-Key": self.api_key,
+            },
+            params={"filename": filename},
+        )
+
+        if response.status_code == 401:
+            raise RedmineAuthenticationError(
+                "Authentifizierung fehlgeschlagen", status_code=401
+            )
+
+        response.raise_for_status()
+        return response.json()
+
+    def _download_file(self, url: str) -> bytes:
+        """Download einer Datei als Bytes."""
+        logger.debug(f"GET {url}")
+
+        response = self.client.get(
+            url,
+            headers={"X-Redmine-API-Key": self.api_key},
+        )
+
+        if response.status_code == 401:
+            raise RedmineAuthenticationError(
+                "Authentifizierung fehlgeschlagen", status_code=401
+            )
+
+        if response.status_code == 404:
+            raise RedmineNotFoundError(
+                f"Datei nicht gefunden: {url}", status_code=404
+            )
+
+        response.raise_for_status()
+        return response.content
 
     def _paginate(
         self,
@@ -344,6 +390,7 @@ class RedmineClient:
         assigned_to_id: int | None = None,
         parent_issue_id: int | None = None,
         custom_fields: list[dict[str, Any]] | None = None,
+        uploads: list[dict[str, Any]] | None = None,
     ) -> RedmineIssue:
         """
         Erstellt ein neues Issue.
@@ -357,6 +404,7 @@ class RedmineClient:
             assigned_to_id: Zugewiesen an (User-ID)
             parent_issue_id: Parent-Issue für Unteraufgaben
             custom_fields: Custom Fields als Liste von {id, value} Dicts
+            uploads: Liste von Upload-Dicts mit {token, filename, content_type}
         """
         issue_data: dict[str, Any] = {
             "project_id": project_id,
@@ -373,6 +421,8 @@ class RedmineClient:
             issue_data["parent_issue_id"] = parent_issue_id
         if custom_fields:
             issue_data["custom_fields"] = custom_fields
+        if uploads:
+            issue_data["uploads"] = uploads
 
         response = self._post("/issues.json", json={"issue": issue_data})
         return RedmineIssue.from_api_response(response.get("issue", {}))
@@ -388,6 +438,7 @@ class RedmineClient:
         done_ratio: int | None = None,
         notes: str | None = None,
         custom_fields: list[dict[str, Any]] | None = None,
+        uploads: list[dict[str, Any]] | None = None,
     ) -> None:
         """
         Aktualisiert ein bestehendes Issue.
@@ -402,6 +453,7 @@ class RedmineClient:
             done_ratio: Fortschritt in % (0-100)
             notes: Kommentar hinzufügen
             custom_fields: Custom Fields als Liste von {id, value} Dicts
+            uploads: Liste von Upload-Dicts mit {token, filename, content_type}
         """
         issue_data: dict[str, Any] = {}
 
@@ -421,6 +473,8 @@ class RedmineClient:
             issue_data["notes"] = notes
         if custom_fields is not None:
             issue_data["custom_fields"] = custom_fields
+        if uploads is not None:
+            issue_data["uploads"] = uploads
 
         self._put(f"/issues/{issue_id}.json", json={"issue": issue_data})
 
@@ -551,3 +605,72 @@ class RedmineClient:
             title: Seitentitel
         """
         self._delete(f"/projects/{project_id}/wiki/{title}.json")
+
+    # === Attachments ===
+
+    def upload_file(
+        self,
+        file_data: Path | str | bytes,
+        filename: str | None = None,
+    ) -> str:
+        """
+        Lädt eine Datei hoch und gibt das Upload-Token zurück.
+
+        Args:
+            file_data: Dateipfad (Path/str) oder Bytes-Daten
+            filename: Dateiname (wird aus Pfad abgeleitet falls nicht angegeben)
+
+        Returns:
+            Upload-Token für die Verwendung in create_issue/update_issue
+        """
+        if isinstance(file_data, (str, Path)):
+            path = Path(file_data)
+            if filename is None:
+                filename = path.name
+            file_data = path.read_bytes()
+
+        if filename is None:
+            filename = "upload"
+
+        response = self._upload_file(file_data, filename)
+        token: str = response.get("upload", {}).get("token", "")
+        return token
+
+    def get_attachment(self, attachment_id: int) -> RedmineAttachment:
+        """
+        Ruft Attachment-Metadaten ab.
+
+        Args:
+            attachment_id: Attachment-ID
+        """
+        response = self._get(f"/attachments/{attachment_id}.json")
+        return RedmineAttachment.from_api_response(
+            response.get("attachment", {})
+        )
+
+    def download_attachment(self, attachment_id: int) -> bytes:
+        """
+        Lädt ein Attachment herunter.
+
+        Args:
+            attachment_id: Attachment-ID
+
+        Returns:
+            Dateiinhalt als Bytes
+        """
+        attachment = self.get_attachment(attachment_id)
+        if not attachment.content_url:
+            raise RedmineNotFoundError(
+                f"Keine Download-URL für Attachment {attachment_id}",
+                status_code=404,
+            )
+        return self._download_file(attachment.content_url)
+
+    def delete_attachment(self, attachment_id: int) -> None:
+        """
+        Löscht ein Attachment.
+
+        Args:
+            attachment_id: Attachment-ID
+        """
+        self._delete(f"/attachments/{attachment_id}.json")

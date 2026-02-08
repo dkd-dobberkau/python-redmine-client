@@ -389,3 +389,108 @@ class TestAsyncWiki:
 
         request = httpx_mock.get_request()
         assert request.method == "DELETE"
+
+
+class TestAsyncAttachments:
+    """Tests für async Attachment-Operationen."""
+
+    @pytest.mark.asyncio
+    async def test_upload_file_bytes(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Datei-Upload mit Bytes gibt Token zurück."""
+        httpx_mock.add_response(
+            json={"upload": {"token": "async-upload-token"}}
+        )
+
+        token = await async_client.upload_file(b"async content", filename="test.txt")
+
+        assert token == "async-upload-token"
+        request = httpx_mock.get_request()
+        assert request.headers["Content-Type"] == "application/octet-stream"
+
+    @pytest.mark.asyncio
+    async def test_get_attachment(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachment-Metadaten werden abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "attachment": {
+                    "id": 42,
+                    "filename": "report.pdf",
+                    "filesize": 98765,
+                    "content_url": "https://redmine.example.com/attachments/download/42/report.pdf",
+                    "author": {"id": 1, "name": "Test User"},
+                }
+            }
+        )
+
+        att = await async_client.get_attachment(42)
+
+        assert att.id == 42
+        assert att.filename == "report.pdf"
+
+    @pytest.mark.asyncio
+    async def test_download_attachment(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachment wird heruntergeladen."""
+        httpx_mock.add_response(
+            json={
+                "attachment": {
+                    "id": 42,
+                    "filename": "report.pdf",
+                    "filesize": 11,
+                    "content_url": "https://redmine.example.com/attachments/download/42/report.pdf",
+                    "author": {"id": 1, "name": "User"},
+                }
+            }
+        )
+        httpx_mock.add_response(content=b"async PDF data")
+
+        data = await async_client.download_attachment(42)
+
+        assert data == b"async PDF data"
+
+    @pytest.mark.asyncio
+    async def test_delete_attachment(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Attachment wird gelöscht."""
+        httpx_mock.add_response(status_code=204)
+
+        await async_client.delete_attachment(42)
+
+        request = httpx_mock.get_request()
+        assert request.method == "DELETE"
+        assert "/attachments/42.json" in str(request.url)
+
+    @pytest.mark.asyncio
+    async def test_create_issue_with_uploads(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Issue mit Uploads wird erstellt."""
+        httpx_mock.add_response(
+            json={
+                "issue": {
+                    "id": 999,
+                    "subject": "Issue mit Anhang",
+                    "project": {"id": 1, "name": "P"},
+                    "tracker": {"id": 1, "name": "Bug"},
+                    "status": {"id": 1, "name": "New"},
+                    "priority": {"id": 2, "name": "Normal"},
+                    "author": {"id": 1, "name": "User"},
+                }
+            }
+        )
+
+        issue = await async_client.create_issue(
+            project_id="my-project",
+            subject="Issue mit Anhang",
+            uploads=[{"token": "abc-123", "filename": "test.txt"}],
+        )
+
+        assert issue.id == 999
+        request = httpx_mock.get_request()
+        assert b'"uploads"' in request.content
