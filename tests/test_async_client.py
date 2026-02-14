@@ -12,8 +12,8 @@ from redmine_client import (
 )
 
 
-@pytest.fixture
-def async_client():
+@pytest.fixture(name="async_client")
+def create_async_client():
     """Erstellt einen Test-Client."""
     return AsyncRedmineClient("https://redmine.example.com", "test-api-key")
 
@@ -170,7 +170,7 @@ class TestAsyncIssues:
         await async_client.add_issue_note(123, "Async Kommentar")
 
         request = httpx_mock.get_request()
-        assert b"Async Kommentar" in request.content
+        assert request is not None and b"Async Kommentar" in request.content
 
 
 class TestAsyncCustomFields:
@@ -249,6 +249,8 @@ class TestAsyncIncludeParameters:
         await async_client.get_issue(200, include=["journals", "attachments"])
 
         request = httpx_mock.get_request()
+        assert request is not None
+
         url_str = str(request.url)
         assert "journals" in url_str
         assert "attachments" in url_str
@@ -376,7 +378,7 @@ class TestAsyncWiki:
         )
 
         request = httpx_mock.get_request()
-        assert b'"text"' in request.content
+        assert request is not None and b'"text"' in request.content
 
     @pytest.mark.asyncio
     async def test_delete_wiki_page(
@@ -388,7 +390,7 @@ class TestAsyncWiki:
         await async_client.delete_wiki_page("my-project", "OldPage")
 
         request = httpx_mock.get_request()
-        assert request.method == "DELETE"
+        assert request is not None and request.method == "DELETE"
 
 
 class TestAsyncAttachments:
@@ -407,7 +409,7 @@ class TestAsyncAttachments:
 
         assert token == "async-upload-token"
         request = httpx_mock.get_request()
-        assert request.headers["Content-Type"] == "application/octet-stream"
+        assert request is not None and request.headers["Content-Type"] == "application/octet-stream"
 
     @pytest.mark.asyncio
     async def test_get_attachment(
@@ -463,7 +465,7 @@ class TestAsyncAttachments:
         await async_client.delete_attachment(42)
 
         request = httpx_mock.get_request()
-        assert request.method == "DELETE"
+        assert request is not None and request.method == "DELETE"
         assert "/attachments/42.json" in str(request.url)
 
     @pytest.mark.asyncio
@@ -493,4 +495,4 @@ class TestAsyncAttachments:
 
         assert issue.id == 999
         request = httpx_mock.get_request()
-        assert b'"uploads"' in request.content
+        assert request is not None and b'"uploads"' in request.content

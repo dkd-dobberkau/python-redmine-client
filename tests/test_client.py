@@ -13,8 +13,8 @@ from redmine_client import (
 )
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(name="client")
+def create_client():
     """Erstellt einen Test-Client."""
     return RedmineClient("https://redmine.example.com", "test-api-key")
 
@@ -550,6 +550,8 @@ class TestIncludeParameters:
             )
 
         request = httpx_mock.get_request()
+        assert request is not None
+
         url_str = str(request.url)
         # journals sollte nur einmal vorkommen
         assert url_str.count("journals") == 1
@@ -782,6 +784,8 @@ class TestWiki:
         assert page.attachments[0].filename == "diagram.png"
 
         request = httpx_mock.get_request()
+        assert request is not None
+
         assert "include=attachments" in str(request.url)
 
     def test_get_wiki_page_with_parent(
@@ -864,7 +868,7 @@ class TestAttachments:
 
         assert token == "pdf-upload-token"
         request = httpx_mock.get_request()
-        assert request.content == b"PDF content"
+        assert request is not None and request.content == b"PDF content"
         assert "filename=document.pdf" in str(request.url)
 
     def test_get_attachment(self, client: RedmineClient, httpx_mock: HTTPXMock):
@@ -958,6 +962,8 @@ class TestAttachments:
 
         assert issue.id == 999
         request = httpx_mock.get_request()
+        
+        assert request is not None
         assert b'"uploads"' in request.content
         assert b'"token"' in request.content
 
@@ -979,4 +985,4 @@ class TestAttachments:
         )
 
         request = httpx_mock.get_request()
-        assert b'"uploads"' in request.content
+        assert request is not None and b'"uploads"' in request.content
