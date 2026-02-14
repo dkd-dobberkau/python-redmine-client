@@ -13,7 +13,8 @@ import logging
 import warnings
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, TypeVar
+from pydantic import BaseModel
 
 import httpx
 
@@ -33,6 +34,106 @@ from redmine_client.models import (
 )
 
 logger = logging.getLogger(__name__)
+ResultT = TypeVar("ResultT", bound=BaseModel)
+
+
+class AsyncRedmineResultPaginator(Generic[ResultT]):
+    """An asynchronous paginator for Redmine API responses.
+
+    This paginator lazily fetches records from a paginated Redmine API endpoint and
+    yields them one by one. It handles the offset, page size and optional limit
+    parameters automatically.
+
+    Parameters
+    ----------
+    client : AsyncRedmineClient
+        The client instance used to make HTTP requests.
+    model : type[ResultT]
+        A Pydantic model that represents a single record in the response.
+    path : str
+        The API endpoint path (e.g., "/issues.json").
+    key : str
+        The key in the JSON payload that contains the list of records.
+    params : dict[str, Any] | None, optional
+        Additional query parameters passed to each request.
+    offset : int, default 0
+        Initial offset for pagination.
+    page_size : int, default 100
+        Number of records to fetch per request.
+    limit : int, default -1
+        Maximum number of records to return. A negative value means no limit.
+
+    Note
+    ----
+    The paginator implements the asynchronous iterator protocol, so it can be used
+    in ``async for`` loops::
+
+        paginator = AsyncRedmineResultPaginator(...)
+        async for record in paginator:
+            ...
+
+    """
+
+    def __init__(
+        self,
+        client: "AsyncRedmineClient",
+        model: type[ResultT],
+        path: str,
+        key: str,
+        params: dict[str, Any] | None = None,
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1,
+    ) -> None:
+        self._client = client
+        self._model = model
+        self._path = path
+        self._key = key
+        self._params = dict(params or {})
+        self._offset = offset
+        self._page_size = page_size
+        self._limit = limit
+
+        # interner Puffer für die aktuelle Seite
+        self._buffer: list[ResultT] = []
+        self._done = False
+
+    def __aiter__(self) -> "AsyncRedmineResultPaginator[ResultT]":
+        return self
+
+    async def __anext__(self) -> ResultT:
+        # Puffer leer → nächste Seite laden
+        if not self._buffer:
+            if self._done:
+                raise StopAsyncIteration
+            await self._fetch_next_page()
+            if not self._buffer:
+                raise StopAsyncIteration
+        return self._buffer.pop(0)
+
+    async def _fetch_next_page(self) -> None:
+        fetch_limit = (
+            self._page_size
+            if self._limit < 0 or self._limit - self._offset > self._page_size
+            else self._limit - self._offset
+        )
+        self._params["offset"] = self._offset
+        self._params["limit"] = fetch_limit
+        response = await self._client._get(self._path, self._params)
+        records = response.get(self._key, [])
+
+        self._buffer = [self._model.model_validate(r) for r in records]
+        self._offset += len(records)
+
+        total_count = response.get("total_count", len(records))
+
+        # Abbruchbedingungen
+        if self._offset >= total_count:
+            self._done = True
+        if self._limit >= 0 and self._offset >= self._limit:
+            self._done = True
+
+
 
 
 class AsyncRedmineClient:
@@ -109,14 +210,10 @@ class AsyncRedmineClient:
         )
 
         if response.status_code == 401:
-            raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen"
-            )
+            raise RedmineAuthenticationError("Authentifizierung fehlgeschlagen")
 
         if response.status_code == 404:
-            raise RedmineNotFoundError(
-                f"Ressource nicht gefunden: {path}"
-            )
+            raise RedmineNotFoundError(f"Ressource nicht gefunden: {path}")
 
         if response.status_code == 422:
             error_response = response.json() if response.content else {}
@@ -149,9 +246,7 @@ class AsyncRedmineClient:
         """DELETE-Request."""
         return await self._request("DELETE", path)
 
-    async def _upload_file(
-        self, file_data: bytes, filename: str
-    ) -> dict[str, Any]:
+    async def _upload_file(self, file_data: bytes, filename: str) -> dict[str, Any]:
         """Upload-Request mit octet-stream Content-Type."""
         logger.debug("POST /uploads.json filename=%s", filename)
 
@@ -166,9 +261,7 @@ class AsyncRedmineClient:
         )
 
         if response.status_code == 401:
-            raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen"
-            )
+            raise RedmineAuthenticationError("Authentifizierung fehlgeschlagen")
 
         response.raise_for_status()
         return response.json()
@@ -195,35 +288,6 @@ class AsyncRedmineClient:
         response.raise_for_status()
         return response.content
 
-    async def _paginate(
-        self,
-        path: str,
-        key: str,
-        params: dict[str, Any] | None = None,
-        limit: int = 100,
-    ) -> list[dict]:
-        """Iteriert durch alle Seiten einer paginierten Ressource."""
-        params = params or {}
-        params["limit"] = limit
-
-        all_records = []
-        offset = 0
-
-        while True:
-            params["offset"] = offset
-            response = await self._get(path, params)
-
-            records = response.get(key, [])
-            all_records.extend(records)
-
-            total_count = response.get("total_count", len(records))
-            if offset + len(records) >= total_count:
-                break
-
-            offset += limit
-
-        return all_records
-
     # === Users ===
 
     async def get_current_user(self) -> dict:
@@ -237,8 +301,8 @@ class AsyncRedmineClient:
         return RedmineUser(**response.get("user", {}))
 
     async def get_users(
-        self, status: int | None = None, limit: int = 100
-    ) -> list[RedmineUser]:
+        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int = -1
+    ) -> AsyncRedmineResultPaginator[RedmineUser]:
         """
         Ruft Benutzer ab.
 
@@ -250,21 +314,23 @@ class AsyncRedmineClient:
         if status is not None:
             params["status"] = status
 
-        records = await self._paginate("/users.json", "users", params, limit)
-        return [RedmineUser(**r) for r in records]
+        return AsyncRedmineResultPaginator(
+            self, RedmineUser, "/users.json", "users", params, offset, page_size, limit
+        )
 
     # === Projects ===
 
-    async def get_projects(
-        self, include_closed: bool = False, limit: int = 100
-    ) -> list[RedmineProject]:
+    def get_projects(
+        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int = -1
+    ) -> AsyncRedmineResultPaginator[RedmineProject]:
         """Ruft alle Projekte ab."""
         params: dict[str, Any] = {}
         if not include_closed:
             params["status"] = 1  # Nur aktive Projekte
 
-        records = await self._paginate("/projects.json", "projects", params, limit)
-        return [RedmineProject(**r) for r in records]
+        return AsyncRedmineResultPaginator(
+            self, RedmineProject, "/projects.json", "projects", params, offset, page_size, limit
+        )
 
     async def get_project(self, project_id: int | str) -> RedmineProject:
         """Ruft einzelnes Projekt ab."""
@@ -273,7 +339,7 @@ class AsyncRedmineClient:
 
     # === Time Entries ===
 
-    async def get_time_entries(
+    def get_time_entries(
         self,
         user_id: int | None = None,
         project_id: int | str | None = None,
@@ -281,8 +347,10 @@ class AsyncRedmineClient:
         from_date: date | None = None,
         to_date: date | None = None,
         activity_id: int | None = None,
-        limit: int = 100,
-    ) -> list[RedmineTimeEntry]:
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1,
+    ) -> AsyncRedmineResultPaginator[RedmineTimeEntry]:
         """Ruft Zeitbuchungen ab."""
         params: dict[str, Any] = {}
         if user_id:
@@ -298,10 +366,16 @@ class AsyncRedmineClient:
         if activity_id:
             params["activity_id"] = activity_id
 
-        records = await self._paginate(
-            "/time_entries.json", "time_entries", params, limit
+        return AsyncRedmineResultPaginator(
+            self,
+            RedmineTimeEntry,
+            "/time_entries.json",
+            "time_entries",
+            params,
+            offset,
+            page_size,
+            limit,
         )
-        return [RedmineTimeEntry.from_api_response(r) for r in records]
 
     async def get_time_entry(self, time_entry_id: int) -> RedmineTimeEntry:
         """Ruft einzelne Zeitbuchung ab."""
@@ -310,7 +384,7 @@ class AsyncRedmineClient:
 
     # === Issues ===
 
-    async def get_issues(
+    def get_issues(
         self,
         project_id: int | str | None = None,
         assigned_to_id: int | str | None = None,
@@ -318,19 +392,12 @@ class AsyncRedmineClient:
         tracker_id: int | None = None,
         updated_on: str | None = None,
         created_on: str | None = None,
-        limit: int = 100,
-    ) -> list[RedmineIssue]:
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1,
+    ) -> AsyncRedmineResultPaginator[RedmineIssue]:
         """
         Ruft Issues ab.
-
-        Args:
-            project_id: Filter nach Projekt
-            assigned_to_id: Filter nach Zugewiesenem (oder "me")
-            status_id: Filter nach Status ("open", "closed", "*", oder ID)
-            tracker_id: Filter nach Tracker
-            updated_on: Filter nach Update-Datum (z.B. ">=2025-01-01")
-            created_on: Filter nach Erstelldatum (z.B. ">=2025-01-01")
-            limit: Max. Einträge pro Seite
         """
         params: dict[str, Any] = {}
         if project_id:
@@ -346,8 +413,9 @@ class AsyncRedmineClient:
         if created_on:
             params["created_on"] = created_on
 
-        records = await self._paginate("/issues.json", "issues", params, limit)
-        return [RedmineIssue.from_api_response(r) for r in records]
+        return AsyncRedmineResultPaginator(
+            self, RedmineIssue, "/issues.json", "issues", params, offset, page_size, limit
+        )
 
     async def get_issue(
         self,
@@ -494,10 +562,7 @@ class AsyncRedmineClient:
         Hinweis: Benötigt Admin-Rechte.
         """
         response = await self._get("/custom_fields.json")
-        return [
-            RedmineCustomFieldDefinition(**cf)
-            for cf in response.get("custom_fields", [])
-        ]
+        return [RedmineCustomFieldDefinition(**cf) for cf in response.get("custom_fields", [])]
 
     async def get_issue_custom_fields(self) -> list[RedmineCustomFieldDefinition]:
         """Ruft nur Issue Custom Fields ab."""
@@ -538,9 +603,7 @@ class AsyncRedmineClient:
 
     # === Wiki ===
 
-    async def get_wiki_pages(
-        self, project_id: int | str
-    ) -> list[RedmineWikiPage]:
+    async def get_wiki_pages(self, project_id: int | str) -> list[RedmineWikiPage]:
         """
         Ruft die Wiki-Seitenübersicht eines Projekts ab.
 
@@ -548,10 +611,7 @@ class AsyncRedmineClient:
             project_id: Projekt-ID oder Identifier
         """
         response = await self._get(f"/projects/{project_id}/wiki/index.json")
-        return [
-            RedmineWikiPage.from_api_response(w)
-            for w in response.get("wiki_pages", [])
-        ]
+        return [RedmineWikiPage.from_api_response(w) for w in response.get("wiki_pages", [])]
 
     async def get_wiki_page(
         self,
@@ -571,9 +631,7 @@ class AsyncRedmineClient:
         if include_attachments:
             params["include"] = "attachments"
 
-        response = await self._get(
-            f"/projects/{project_id}/wiki/{title}.json", params=params
-        )
+        response = await self._get(f"/projects/{project_id}/wiki/{title}.json", params=params)
         return RedmineWikiPage.from_api_response(response.get("wiki_page", {}))
 
     async def create_or_update_wiki_page(
@@ -601,9 +659,7 @@ class AsyncRedmineClient:
             json={"wiki_page": wiki_data},
         )
 
-    async def delete_wiki_page(
-        self, project_id: int | str, title: str
-    ) -> None:
+    async def delete_wiki_page(self, project_id: int | str, title: str) -> None:
         """
         Löscht eine Wiki-Seite.
 
@@ -651,9 +707,7 @@ class AsyncRedmineClient:
             attachment_id: Attachment-ID
         """
         response = await self._get(f"/attachments/{attachment_id}.json")
-        return RedmineAttachment.from_api_response(
-            response.get("attachment", {})
-        )
+        return RedmineAttachment.from_api_response(response.get("attachment", {}))
 
     async def download_attachment(self, attachment_id: int) -> bytes:
         """
@@ -667,9 +721,7 @@ class AsyncRedmineClient:
         """
         attachment = await self.get_attachment(attachment_id)
         if not attachment.content_url:
-            raise RedmineNotFoundError(
-                f"Keine Download-URL für Attachment {attachment_id}"
-            )
+            raise RedmineNotFoundError(f"Keine Download-URL für Attachment {attachment_id}")
         return await self._download_file(attachment.content_url)
 
     async def delete_attachment(self, attachment_id: int) -> None:

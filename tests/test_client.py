@@ -134,7 +134,7 @@ class TestProjects:
             }
         )
 
-        projects = client.get_projects()
+        projects = [item for item in client.get_projects()]
 
         assert len(projects) == 2
         assert projects[0].name == "Project A"
@@ -163,7 +163,7 @@ class TestIssues:
             }
         )
 
-        issues = client.get_issues(assigned_to_id="me", status_id="open")
+        issues = [item for item in client.get_issues(assigned_to_id="me", status_id="open")]
 
         assert len(issues) == 1
         assert issues[0].id == 123
@@ -481,7 +481,7 @@ class TestPagination:
             }
         )
 
-        issues = client.get_issues()
+        issues = [item for item in client.get_issues()]
 
         assert len(issues) == 150
         assert issues[0].id == 1

@@ -113,7 +113,7 @@ class TestAsyncIssues:
             }
         )
 
-        issues = await async_client.get_issues(assigned_to_id="me")
+        issues = [item async for item in async_client.get_issues(assigned_to_id="me")]
 
         assert len(issues) == 1
         assert issues[0].id == 123
@@ -218,7 +218,7 @@ class TestAsyncPagination:
             }
         )
 
-        issues = await async_client.get_issues()
+        issues = [item async for item in async_client.get_issues()]
 
         assert len(issues) == 150
 

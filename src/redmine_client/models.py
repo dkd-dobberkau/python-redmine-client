@@ -4,13 +4,27 @@ Pydantic-Modelle für Redmine API Ressourcen.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from datetime import date
-from typing import Any
+from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, Field
 
+RedmineApiModelT = TypeVar("RedmineApiModelT", bound="RedmineApiModel")
 
-class RedmineUser(BaseModel):
+class RedmineApiModel(BaseModel, ABC):
+    """
+    Abstract class provides a extended Interface for all Redmine result BaseModels
+    """
+    @classmethod
+    @abstractmethod
+    def from_api_response(cls: Type[RedmineApiModelT], data: dict) -> RedmineApiModelT:
+        """
+        Parse the result via Pydantic with optional mappings
+        """
+        ...
+
+class RedmineUser(RedmineApiModel):
     """Redmine Benutzer."""
 
     id: int
@@ -26,6 +40,12 @@ class RedmineUser(BaseModel):
         """Vollständiger Name."""
         return f"{self.firstname or ''} {self.lastname or ''}".strip()
 
+    @classmethod
+    def from_api_response(cls, data: dict) -> RedmineUser:
+        """
+        Validate and parse the API result to a RedmineUser instance
+        """
+        return RedmineUser.model_validate(data)    
 
 class RedmineCustomField(BaseModel):
     """Redmine Custom Field Wert."""
@@ -54,7 +74,7 @@ class RedmineCustomFieldDefinition(BaseModel):
     model_config = {"extra": "ignore"}
 
 
-class RedmineProject(BaseModel):
+class RedmineProject(RedmineApiModel):
     """Redmine Projekt."""
 
     id: int
@@ -77,8 +97,14 @@ class RedmineProject(BaseModel):
                     return cf.value
         return None
 
+    @classmethod
+    def from_api_response(cls, data: dict) -> RedmineProject:
+        """
+        Validate and parse the API result to a RedmineProject instance
+        """
+        return RedmineProject.model_validate(data)   
 
-class RedmineTimeEntry(BaseModel):
+class RedmineTimeEntry(RedmineApiModel):
     """Redmine Zeiteintrag."""
 
     id: int
@@ -131,7 +157,7 @@ class RedmineJournalDetail(BaseModel):
     model_config = {"extra": "ignore"}
 
 
-class RedmineJournal(BaseModel):
+class RedmineJournal(RedmineApiModel):
     """Journal-Eintrag (Kommentar/Änderung) eines Issues."""
 
     id: int
@@ -160,7 +186,7 @@ class RedmineJournal(BaseModel):
         )
 
 
-class RedmineAttachment(BaseModel):
+class RedmineAttachment(RedmineApiModel):
     """Redmine Dateianhang."""
 
     id: int
@@ -204,7 +230,7 @@ class RedmineRelation(BaseModel):
     model_config = {"extra": "ignore"}
 
 
-class RedmineChangeset(BaseModel):
+class RedmineChangeset(RedmineApiModel):
     """Redmine Changeset (VCS-Commit)."""
 
     revision: str = ""
@@ -238,7 +264,7 @@ class RedmineAllowedStatus(BaseModel):
     model_config = {"extra": "ignore"}
 
 
-class RedmineIssue(BaseModel):
+class RedmineIssue(RedmineApiModel):
     """Redmine Issue/Ticket."""
 
     id: int
@@ -382,7 +408,7 @@ class RedmineIssue(BaseModel):
         return None
 
 
-class RedmineWikiPage(BaseModel):
+class RedmineWikiPage(RedmineApiModel):
     """Redmine Wiki-Seite."""
 
     title: str = ""

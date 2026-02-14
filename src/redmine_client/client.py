@@ -13,7 +13,7 @@ import logging
 import warnings
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import httpx
 
@@ -30,9 +30,95 @@ from redmine_client.models import (
     RedmineTimeEntry,
     RedmineUser,
     RedmineWikiPage,
+    RedmineApiModel
 )
 
 logger = logging.getLogger(__name__)
+ResultT = TypeVar("ResultT", bound=RedmineApiModel)
+
+# Synchronous paginator for Redmine API results
+class RedmineResultPaginator(Generic[ResultT]):
+    """Iterator over paginated Redmine API responses.
+
+    Parameters
+    ----------
+    client : RedmineClient
+        The client instance used to make HTTP requests.
+    model : type
+        The class used to instantiate each record.
+    path : str
+        API endpoint path.
+    key : str
+        Key in JSON response containing list of records.
+    params : dict, optional
+        Additional query parameters.
+    offset : int, default 0
+        Initial offset.
+    page_size : int, default 100
+        Number of records per request.
+    limit : int, default -1
+        Maximum number of records to return; negative means no limit.
+    """
+    def __init__(
+        self,
+        client: "RedmineClient",
+        model: type[ResultT],
+        path: str,
+        key: str,
+        params: dict[str, Any] | None = None,
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1
+    ):
+        self._client = client
+        self._model = model
+        self._path = path
+        self._key = key
+        self._params = dict(params or {})
+        self._offset = offset
+        self._page_size = page_size
+        self._limit = limit
+
+        # interner Puffer für die aktuelle Seite
+        self._buffer: list[ResultT] = []
+        self._done = False
+
+    def __iter__(self) -> "RedmineResultPaginator[ResultT]":
+        return self
+
+    def __next__(self) -> ResultT:
+        # Puffer leer → nächste Seite laden
+        if not self._buffer:
+            if self._done:
+                raise StopIteration
+            self._fetch_next_page()
+            if not self._buffer:
+                raise StopIteration
+        return self._buffer.pop(0)
+
+    def _fetch_next_page(self):
+        fetch_limit = (
+            self._page_size
+            if self._limit < 0 or self._limit - self._offset > self._page_size
+            else self._limit - self._offset
+        )
+        self._params["offset"] = self._offset
+        self._params["limit"] = fetch_limit
+        response = self._client._get(self._path, self._params)
+        records = response.get(self._key, [])
+
+        self._buffer = [self._model.from_api_response(r) for r in records]
+        self._offset += len(records)
+
+        total_count = response.get("total_count", len(records))
+
+        # Abbruchbedingungen
+        if self._offset >= total_count:
+            self._done = True
+        if self._limit >= 0 and self._offset >= self._limit:
+            self._done = True
+
+
 
 
 class RedmineClient:
@@ -164,9 +250,7 @@ class RedmineClient:
         )
 
         if response.status_code == 401:
-            raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen"
-            )
+            raise RedmineAuthenticationError("Authentifizierung fehlgeschlagen")
 
         response.raise_for_status()
         return response.json()
@@ -193,35 +277,6 @@ class RedmineClient:
         response.raise_for_status()
         return response.content
 
-    def _paginate(
-        self,
-        path: str,
-        key: str,
-        params: dict[str, Any] | None = None,
-        limit: int = 100,
-    ) -> list[dict]:
-        """Iteriert durch alle Seiten einer paginierten Ressource."""
-        params = params or {}
-        params["limit"] = limit
-
-        all_records = []
-        offset = 0
-
-        while True:
-            params["offset"] = offset
-            response = self._get(path, params)
-
-            records = response.get(key, [])
-            all_records.extend(records)
-
-            total_count = response.get("total_count", len(records))
-            if offset + len(records) >= total_count:
-                break
-
-            offset += limit
-
-        return all_records
-
     # === Users ===
 
     def get_current_user(self) -> dict:
@@ -235,8 +290,8 @@ class RedmineClient:
         return RedmineUser(**response.get("user", {}))
 
     def get_users(
-        self, status: int | None = None, limit: int = 100
-    ) -> list[RedmineUser]:
+        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int = -1
+    ) -> RedmineResultPaginator[RedmineUser]:
         """
         Ruft Benutzer ab.
 
@@ -248,21 +303,19 @@ class RedmineClient:
         if status is not None:
             params["status"] = status
 
-        records = self._paginate("/users.json", "users", params, limit)
-        return [RedmineUser(**r) for r in records]
+        return RedmineResultPaginator(self, RedmineUser, "/users.json", "users", params, offset, page_size, limit)
 
     # === Projects ===
 
     def get_projects(
-        self, include_closed: bool = False, limit: int = 100
-    ) -> list[RedmineProject]:
+        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int = -1
+    ) -> RedmineResultPaginator[RedmineProject]:
         """Ruft alle Projekte ab."""
         params: dict[str, Any] = {}
         if not include_closed:
             params["status"] = 1  # Nur aktive Projekte
 
-        records = self._paginate("/projects.json", "projects", params, limit)
-        return [RedmineProject(**r) for r in records]
+        return RedmineResultPaginator(self, RedmineProject, "/projects.json", "projects", params, offset, page_size, limit)
 
     def get_project(self, project_id: int | str) -> RedmineProject:
         """Ruft einzelnes Projekt ab."""
@@ -279,8 +332,10 @@ class RedmineClient:
         from_date: date | None = None,
         to_date: date | None = None,
         activity_id: int | None = None,
-        limit: int = 100,
-    ) -> list[RedmineTimeEntry]:
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1,
+    ) -> RedmineResultPaginator[RedmineTimeEntry]:
         """Ruft Zeitbuchungen ab."""
         params: dict[str, Any] = {}
         if user_id:
@@ -296,8 +351,7 @@ class RedmineClient:
         if activity_id:
             params["activity_id"] = activity_id
 
-        records = self._paginate("/time_entries.json", "time_entries", params, limit)
-        return [RedmineTimeEntry.from_api_response(r) for r in records]
+        return RedmineResultPaginator(self, RedmineTimeEntry, "/time_entries.json", "time_entries", params, offset, page_size, limit)
 
     def get_time_entry(self, time_entry_id: int) -> RedmineTimeEntry:
         """Ruft einzelne Zeitbuchung ab."""
@@ -314,8 +368,10 @@ class RedmineClient:
         tracker_id: int | None = None,
         updated_on: str | None = None,
         created_on: str | None = None,
-        limit: int = 100,
-    ) -> list[RedmineIssue]:
+        offset: int = 0,
+        page_size: int = 100,
+        limit: int = -1,
+    ) -> RedmineResultPaginator[RedmineIssue]:
         """
         Ruft Issues ab.
 
@@ -342,8 +398,9 @@ class RedmineClient:
         if created_on:
             params["created_on"] = created_on
 
-        records = self._paginate("/issues.json", "issues", params, limit)
-        return [RedmineIssue.from_api_response(r) for r in records]
+        return RedmineResultPaginator(
+            self, RedmineIssue, "/issues.json", "issues", params, offset, page_size, limit
+        )
 
     def get_issue(
         self,
@@ -643,9 +700,7 @@ class RedmineClient:
             attachment_id: Attachment-ID
         """
         response = self._get(f"/attachments/{attachment_id}.json")
-        return RedmineAttachment.from_api_response(
-            response.get("attachment", {})
-        )
+        return RedmineAttachment.from_api_response(response.get("attachment", {}))
 
     def download_attachment(self, attachment_id: int) -> bytes:
         """
