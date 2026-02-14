@@ -292,7 +292,7 @@ class TestIssues:
             }
         )
 
-        issue = client.get_issue(100, include_journals=True)
+        issue = client.get_issue(100, include=["journals"])
 
         assert issue.id == 100
         assert issue.journals is not None
@@ -360,7 +360,7 @@ class TestIssues:
             }
         )
 
-        client.get_issue(102, include_journals=True)
+        client.get_issue(102, include=["journals"])
 
         request = httpx_mock.get_request()
         assert request is not None
@@ -570,7 +570,7 @@ class TestIncludeParameters:
                         "filesize": 12345,
                         "content_type": "application/pdf",
                         "description": "Ein Dokument",
-                        "content_url": "https://redmine.example.com/attachments/download/10/doc.pdf",
+                        "content_url": "https://redmine.example.com/attachments/download/1/doc.pdf",
                         "author": {"id": 1, "name": "Test User"},
                         "created_on": "2026-01-20T10:00:00Z",
                     }
@@ -962,7 +962,7 @@ class TestAttachments:
 
         assert issue.id == 999
         request = httpx_mock.get_request()
-        
+
         assert request is not None
         assert b'"uploads"' in request.content
         assert b'"token"' in request.content
