@@ -17,12 +17,12 @@ from typing import Any
 
 import httpx
 
-from .exceptions import (
+from redmine_client.exceptions import (
     RedmineAuthenticationError,
     RedmineNotFoundError,
     RedmineValidationError,
 )
-from .models import (
+from redmine_client.models import (
     RedmineAttachment,
     RedmineCustomFieldDefinition,
     RedmineIssue,
@@ -99,7 +99,7 @@ class AsyncRedmineClient:
         if params:
             params = {k: v for k, v in params.items() if v is not None}
 
-        logger.debug(f"{method} {path} params={params} json={json}")
+        logger.debug("%s %s params=%s json=%s", method, path, params, json)
 
         response = await self.client.request(
             method=method,
@@ -154,7 +154,7 @@ class AsyncRedmineClient:
         self, file_data: bytes, filename: str
     ) -> dict[str, Any]:
         """Upload-Request mit octet-stream Content-Type."""
-        logger.debug(f"POST /uploads.json filename={filename}")
+        logger.debug("POST /uploads.json filename=%s", filename)
 
         response = await self.client.post(
             "/uploads.json",
@@ -176,7 +176,7 @@ class AsyncRedmineClient:
 
     async def _download_file(self, url: str) -> bytes:
         """Download einer Datei als Bytes."""
-        logger.debug(f"GET {url}")
+        logger.debug("GET %s", url)
 
         response = await self.client.get(
             url,

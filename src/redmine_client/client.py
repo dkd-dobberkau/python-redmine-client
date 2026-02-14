@@ -99,7 +99,7 @@ class RedmineClient:
         if params:
             params = {k: v for k, v in params.items() if v is not None}
 
-        logger.debug(f"{method} {path} params={params} json={json}")
+        logger.debug("%s %s params=%s json=%s", method, path, params, json)
 
         response = self.client.request(
             method=method,
@@ -152,7 +152,7 @@ class RedmineClient:
 
     def _upload_file(self, file_data: bytes, filename: str) -> dict[str, Any]:
         """Upload-Request mit octet-stream Content-Type."""
-        logger.debug(f"POST /uploads.json filename={filename}")
+        logger.debug("POST /uploads.json filename=%s", filename)
 
         response = self.client.post(
             "/uploads.json",
@@ -174,7 +174,7 @@ class RedmineClient:
 
     def _download_file(self, url: str) -> bytes:
         """Download einer Datei als Bytes."""
-        logger.debug(f"GET {url}")
+        logger.debug("GET %s", url)
 
         response = self.client.get(
             url,
