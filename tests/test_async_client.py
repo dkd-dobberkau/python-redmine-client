@@ -221,7 +221,32 @@ class TestAsyncPagination:
         issues = [item async for item in async_client.get_issues()]
 
         assert len(issues) == 150
+    
+    @pytest.mark.asyncio
+    async def test_pagination_multiple_pages_with_offset(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Mehrere Seiten werden automatisch abgerufen."""
+        httpx_mock.add_response(
+            json={
+                "issues": [{"id": i, "subject": f"Issue {i}"} for i in range(44, 143)],
+                "total_count": 150,
+            }
+        )
+        httpx_mock.add_response(
+            json={
+                "issues": [
+                    {"id": i, "subject": f"Issue {i}"} for i in range(143, 151)
+                ],
+                "total_count": 150,
+            }
+        )
 
+        issues = [item async for item in async_client.get_issues(offset=43)]
+
+        assert len(issues) == 107
+        assert issues[0].id == 44
+        assert issues[106].id == 150
 
 class TestAsyncIncludeParameters:
     """Tests für erweiterte Include-Parameter (async)."""
