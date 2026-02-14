@@ -71,11 +71,10 @@ class RedmineProject(BaseModel):
 
     def get_custom_field(self, name: str) -> str | list[str] | None:
         """Gibt den Wert eines Custom Fields zurück."""
-        if not self.custom_fields:
-            return None
-        for cf in self.custom_fields:
-            if cf.name == name:
-                return cf.value
+        if self.custom_fields is not None:
+            for cf in self.custom_fields:
+                if cf.name == name:
+                    return cf.value
         return None
 
 
@@ -368,20 +367,18 @@ class RedmineIssue(BaseModel):
 
     def get_custom_field(self, name: str) -> str | list[str] | None:
         """Gibt den Wert eines Custom Fields zurück."""
-        if not self.custom_fields:
-            return None
-        for cf in self.custom_fields:
-            if cf.name == name:
-                return cf.value
+        if self.custom_fields is not None:
+            for cf in self.custom_fields:
+                if cf.name == name:
+                    return cf.value
         return None
 
     def get_custom_field_by_id(self, field_id: int) -> str | list[str] | None:
         """Gibt den Wert eines Custom Fields anhand der ID zurück."""
-        if not self.custom_fields:
-            return None
-        for cf in self.custom_fields:
-            if cf.id == field_id:
-                return cf.value
+        if self.custom_fields is not None:
+            for cf in self.custom_fields:
+                if cf.id == field_id:
+                    return cf.value
         return None
 
 
