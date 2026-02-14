@@ -110,12 +110,12 @@ class AsyncRedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         if response.status_code == 404:
             raise RedmineNotFoundError(
-                f"Ressource nicht gefunden: {path}", status_code=404
+                f"Ressource nicht gefunden: {path}"
             )
 
         if response.status_code == 422:
@@ -123,7 +123,6 @@ class AsyncRedmineClient:
             errors = error_response.get("errors", [])
             raise RedmineValidationError(
                 f"Validierungsfehler: {errors}",
-                status_code=422,
                 response=error_response,
             )
 
@@ -168,7 +167,7 @@ class AsyncRedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         response.raise_for_status()
@@ -185,12 +184,12 @@ class AsyncRedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         if response.status_code == 404:
             raise RedmineNotFoundError(
-                f"Datei nicht gefunden: {url}", status_code=404
+                f"Datei nicht gefunden: {url}"
             )
 
         response.raise_for_status()
@@ -669,8 +668,7 @@ class AsyncRedmineClient:
         attachment = await self.get_attachment(attachment_id)
         if not attachment.content_url:
             raise RedmineNotFoundError(
-                f"Keine Download-URL für Attachment {attachment_id}",
-                status_code=404,
+                f"Keine Download-URL für Attachment {attachment_id}"
             )
         return await self._download_file(attachment.content_url)
 

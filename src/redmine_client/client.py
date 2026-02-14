@@ -17,12 +17,12 @@ from typing import Any
 
 import httpx
 
-from .exceptions import (
+from redmine_client.exceptions import (
     RedmineAuthenticationError,
     RedmineNotFoundError,
     RedmineValidationError,
 )
-from .models import (
+from redmine_client.models import (
     RedmineAttachment,
     RedmineCustomFieldDefinition,
     RedmineIssue,
@@ -110,12 +110,12 @@ class RedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         if response.status_code == 404:
             raise RedmineNotFoundError(
-                f"Ressource nicht gefunden: {path}", status_code=404
+                f"Ressource nicht gefunden: {path}"
             )
 
         if response.status_code == 422:
@@ -123,7 +123,6 @@ class RedmineClient:
             errors = error_response.get("errors", [])
             raise RedmineValidationError(
                 f"Validierungsfehler: {errors}",
-                status_code=422,
                 response=error_response,
             )
 
@@ -166,7 +165,7 @@ class RedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         response.raise_for_status()
@@ -183,12 +182,12 @@ class RedmineClient:
 
         if response.status_code == 401:
             raise RedmineAuthenticationError(
-                "Authentifizierung fehlgeschlagen", status_code=401
+                "Authentifizierung fehlgeschlagen"
             )
 
         if response.status_code == 404:
             raise RedmineNotFoundError(
-                f"Datei nicht gefunden: {url}", status_code=404
+                f"Datei nicht gefunden: {url}"
             )
 
         response.raise_for_status()
@@ -661,8 +660,7 @@ class RedmineClient:
         attachment = self.get_attachment(attachment_id)
         if not attachment.content_url:
             raise RedmineNotFoundError(
-                f"Keine Download-URL für Attachment {attachment_id}",
-                status_code=404,
+                f"Keine Download-URL für Attachment {attachment_id}"
             )
         return self._download_file(attachment.content_url)
 

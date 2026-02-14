@@ -19,17 +19,29 @@ class RedmineError(Exception):
 
 class RedmineAuthenticationError(RedmineError):
     """Authentifizierungsfehler (401)."""
-
-    pass
+    def __init__(
+        self,
+        message: str,
+        response: dict | None = None,
+    ):
+        super().__init__(message, 401, response)
 
 
 class RedmineNotFoundError(RedmineError):
     """Ressource nicht gefunden (404)."""
-
-    pass
+    def __init__(
+        self,
+        message: str,
+        response: dict | None = None,
+    ):
+        super().__init__(message, 404, response)
 
 
 class RedmineValidationError(RedmineError):
     """Validierungsfehler (422)."""
-
-    pass
+    def __init__(
+        self,
+        message: str,
+        response: dict | None = None,
+    ):
+        super().__init__(message, 422, response)
