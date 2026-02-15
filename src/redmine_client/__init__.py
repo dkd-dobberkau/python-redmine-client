@@ -16,15 +16,15 @@ Beispiel (asynchron):
         issues = await client.get_issues(assigned_to_id="me", status_id="open")
 """
 
-from .async_client import AsyncRedmineClient
-from .client import RedmineClient
-from .exceptions import (
+from redmine_client.async_client import AsyncRedmineClient
+from redmine_client.client import RedmineClient
+from redmine_client.exceptions import (
     RedmineAuthenticationError,
     RedmineError,
     RedmineNotFoundError,
     RedmineValidationError,
 )
-from .models import (
+from redmine_client.models import (
     RedmineAllowedStatus,
     RedmineAttachment,
     RedmineChangeset,
