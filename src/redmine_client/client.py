@@ -11,6 +11,7 @@ Beispiel:
 
 import logging
 import warnings
+from collections import deque
 from datetime import date
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -23,6 +24,7 @@ from redmine_client.exceptions import (
     RedmineValidationError,
 )
 from redmine_client.models import (
+    RedmineApiModel,
     RedmineAttachment,
     RedmineCustomFieldDefinition,
     RedmineIssue,
@@ -30,22 +32,24 @@ from redmine_client.models import (
     RedmineTimeEntry,
     RedmineUser,
     RedmineWikiPage,
-    RedmineApiModel
 )
 
 logger = logging.getLogger(__name__)
 ResultT = TypeVar("ResultT", bound=RedmineApiModel)
 
-# Synchronous paginator for Redmine API results
+
 class RedmineResultPaginator(Generic[ResultT]):
     """Iterator over paginated Redmine API responses.
+
+    Lazily fetches records from a paginated Redmine API endpoint and
+    yields them one by one via ``for`` loops.
 
     Parameters
     ----------
     client : RedmineClient
         The client instance used to make HTTP requests.
-    model : type
-        The class used to instantiate each record.
+    model : type[ResultT]
+        A model class with ``from_api_response(data)`` classmethod.
     path : str
         API endpoint path.
     key : str
@@ -56,9 +60,10 @@ class RedmineResultPaginator(Generic[ResultT]):
         Initial offset.
     page_size : int, default 100
         Number of records per request.
-    limit : int, default -1
-        Maximum number of records to return; negative means no limit.
+    limit : int | None, default None
+        Maximum number of records to return. None means no limit.
     """
+
     def __init__(
         self,
         client: "RedmineClient",
@@ -68,7 +73,7 @@ class RedmineResultPaginator(Generic[ResultT]):
         params: dict[str, Any] | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1
+        limit: int | None = None,
     ):
         self._client = client
         self._model = model
@@ -78,44 +83,49 @@ class RedmineResultPaginator(Generic[ResultT]):
         self._offset = offset
         self._page_size = page_size
         self._limit = limit
-
-        # interner Puffer für die aktuelle Seite
-        self._buffer: list[ResultT] = []
+        self._buffer: deque[ResultT] = deque()
         self._done = False
+        self._total_count: int | None = None
+
+    @property
+    def total_count(self) -> int | None:
+        """Total number of records on the server. Available after first page fetch."""
+        return self._total_count
 
     def __iter__(self) -> "RedmineResultPaginator[ResultT]":
         return self
 
     def __next__(self) -> ResultT:
-        # Puffer leer → nächste Seite laden
         if not self._buffer:
             if self._done:
                 raise StopIteration
             self._fetch_next_page()
             if not self._buffer:
                 raise StopIteration
-        return self._buffer.pop(0)
+        return self._buffer.popleft()
 
-    def _fetch_next_page(self):
-        fetch_limit = (
-            self._page_size
-            if self._limit < 0 or self._limit - self._offset > self._page_size
-            else self._limit - self._offset
-        )
+    def _fetch_next_page(self) -> None:
+        fetch_limit = self._page_size
+        if self._limit is not None:
+            remaining = self._limit - self._offset
+            if remaining <= 0:
+                self._done = True
+                return
+            fetch_limit = min(self._page_size, remaining)
+
         self._params["offset"] = self._offset
         self._params["limit"] = fetch_limit
         response = self._client._get(self._path, self._params)
         records = response.get(self._key, [])
 
-        self._buffer = [self._model.from_api_response(r) for r in records]
+        self._buffer = deque(self._model.from_api_response(r) for r in records)
         self._offset += len(records)
 
-        total_count = response.get("total_count", len(records))
+        self._total_count = response.get("total_count", len(records))
 
-        # Abbruchbedingungen
-        if self._offset >= total_count:
+        if self._offset >= self._total_count:
             self._done = True
-        if self._limit >= 0 and self._offset >= self._limit:
+        if self._limit is not None and self._offset >= self._limit:
             self._done = True
 
 
@@ -290,7 +300,7 @@ class RedmineClient:
         return RedmineUser(**response.get("user", {}))
 
     def get_users(
-        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int = -1
+        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int | None = None,
     ) -> RedmineResultPaginator[RedmineUser]:
         """
         Ruft Benutzer ab.
@@ -308,7 +318,7 @@ class RedmineClient:
     # === Projects ===
 
     def get_projects(
-        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int = -1
+        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int | None = None,
     ) -> RedmineResultPaginator[RedmineProject]:
         """Ruft alle Projekte ab."""
         params: dict[str, Any] = {}
@@ -334,7 +344,7 @@ class RedmineClient:
         activity_id: int | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> RedmineResultPaginator[RedmineTimeEntry]:
         """Ruft Zeitbuchungen ab."""
         params: dict[str, Any] = {}
@@ -370,7 +380,7 @@ class RedmineClient:
         created_on: str | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> RedmineResultPaginator[RedmineIssue]:
         """
         Ruft Issues ab.

@@ -13,8 +13,8 @@ import logging
 import warnings
 from datetime import date
 from pathlib import Path
+from collections import deque
 from typing import Any, Generic, TypeVar
-from pydantic import BaseModel
 
 import httpx
 
@@ -24,6 +24,7 @@ from redmine_client.exceptions import (
     RedmineValidationError,
 )
 from redmine_client.models import (
+    RedmineApiModel,
     RedmineAttachment,
     RedmineCustomFieldDefinition,
     RedmineIssue,
@@ -34,22 +35,21 @@ from redmine_client.models import (
 )
 
 logger = logging.getLogger(__name__)
-ResultT = TypeVar("ResultT", bound=BaseModel)
+ResultT = TypeVar("ResultT", bound=RedmineApiModel)
 
 
 class AsyncRedmineResultPaginator(Generic[ResultT]):
-    """An asynchronous paginator for Redmine API responses.
+    """Asynchronous paginator for Redmine API responses.
 
-    This paginator lazily fetches records from a paginated Redmine API endpoint and
-    yields them one by one. It handles the offset, page size and optional limit
-    parameters automatically.
+    Lazily fetches records from a paginated Redmine API endpoint and
+    yields them one by one via ``async for``.
 
     Parameters
     ----------
     client : AsyncRedmineClient
         The client instance used to make HTTP requests.
     model : type[ResultT]
-        A Pydantic model that represents a single record in the response.
+        A model class with ``from_api_response(data)`` classmethod.
     path : str
         The API endpoint path (e.g., "/issues.json").
     key : str
@@ -60,18 +60,8 @@ class AsyncRedmineResultPaginator(Generic[ResultT]):
         Initial offset for pagination.
     page_size : int, default 100
         Number of records to fetch per request.
-    limit : int, default -1
-        Maximum number of records to return. A negative value means no limit.
-
-    Note
-    ----
-    The paginator implements the asynchronous iterator protocol, so it can be used
-    in ``async for`` loops::
-
-        paginator = AsyncRedmineResultPaginator(...)
-        async for record in paginator:
-            ...
-
+    limit : int | None, default None
+        Maximum number of records to return. None means no limit.
     """
 
     def __init__(
@@ -83,7 +73,7 @@ class AsyncRedmineResultPaginator(Generic[ResultT]):
         params: dict[str, Any] | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> None:
         self._client = client
         self._model = model
@@ -93,44 +83,49 @@ class AsyncRedmineResultPaginator(Generic[ResultT]):
         self._offset = offset
         self._page_size = page_size
         self._limit = limit
-
-        # interner Puffer für die aktuelle Seite
-        self._buffer: list[ResultT] = []
+        self._buffer: deque[ResultT] = deque()
         self._done = False
+        self._total_count: int | None = None
+
+    @property
+    def total_count(self) -> int | None:
+        """Total number of records on the server. Available after first page fetch."""
+        return self._total_count
 
     def __aiter__(self) -> "AsyncRedmineResultPaginator[ResultT]":
         return self
 
     async def __anext__(self) -> ResultT:
-        # Puffer leer → nächste Seite laden
         if not self._buffer:
             if self._done:
                 raise StopAsyncIteration
             await self._fetch_next_page()
             if not self._buffer:
                 raise StopAsyncIteration
-        return self._buffer.pop(0)
+        return self._buffer.popleft()
 
     async def _fetch_next_page(self) -> None:
-        fetch_limit = (
-            self._page_size
-            if self._limit < 0 or self._limit - self._offset > self._page_size
-            else self._limit - self._offset
-        )
+        fetch_limit = self._page_size
+        if self._limit is not None:
+            remaining = self._limit - self._offset
+            if remaining <= 0:
+                self._done = True
+                return
+            fetch_limit = min(self._page_size, remaining)
+
         self._params["offset"] = self._offset
         self._params["limit"] = fetch_limit
         response = await self._client._get(self._path, self._params)
         records = response.get(self._key, [])
 
-        self._buffer = [self._model.model_validate(r) for r in records]
+        self._buffer = deque(self._model.from_api_response(r) for r in records)
         self._offset += len(records)
 
-        total_count = response.get("total_count", len(records))
+        self._total_count = response.get("total_count", len(records))
 
-        # Abbruchbedingungen
-        if self._offset >= total_count:
+        if self._offset >= self._total_count:
             self._done = True
-        if self._limit >= 0 and self._offset >= self._limit:
+        if self._limit is not None and self._offset >= self._limit:
             self._done = True
 
 
@@ -300,8 +295,8 @@ class AsyncRedmineClient:
         response = await self._get(f"/users/{user_id}.json")
         return RedmineUser(**response.get("user", {}))
 
-    async def get_users(
-        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int = -1
+    def get_users(
+        self, status: int | None = None, offset: int = 0, page_size: int = 100, limit: int | None = None,
     ) -> AsyncRedmineResultPaginator[RedmineUser]:
         """
         Ruft Benutzer ab.
@@ -321,7 +316,7 @@ class AsyncRedmineClient:
     # === Projects ===
 
     def get_projects(
-        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int = -1
+        self, include_closed: bool = False, offset: int = 0, page_size: int = 100, limit: int | None = None,
     ) -> AsyncRedmineResultPaginator[RedmineProject]:
         """Ruft alle Projekte ab."""
         params: dict[str, Any] = {}
@@ -349,7 +344,7 @@ class AsyncRedmineClient:
         activity_id: int | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> AsyncRedmineResultPaginator[RedmineTimeEntry]:
         """Ruft Zeitbuchungen ab."""
         params: dict[str, Any] = {}
@@ -394,7 +389,7 @@ class AsyncRedmineClient:
         created_on: str | None = None,
         offset: int = 0,
         page_size: int = 100,
-        limit: int = -1,
+        limit: int | None = None,
     ) -> AsyncRedmineResultPaginator[RedmineIssue]:
         """
         Ruft Issues ab.

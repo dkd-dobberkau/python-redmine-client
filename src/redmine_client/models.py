@@ -4,25 +4,19 @@ Pydantic-Modelle für Redmine API Ressourcen.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from datetime import date
-from typing import Any, Type, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-RedmineApiModelT = TypeVar("RedmineApiModelT", bound="RedmineApiModel")
 
-class RedmineApiModel(BaseModel, ABC):
-    """
-    Abstract class provides a extended Interface for all Redmine result BaseModels
-    """
+class RedmineApiModel(BaseModel):
+    """Base class for Redmine API models with consistent parsing interface."""
+
     @classmethod
-    @abstractmethod
-    def from_api_response(cls: Type[RedmineApiModelT], data: dict) -> RedmineApiModelT:
-        """
-        Parse the result via Pydantic with optional mappings
-        """
-        ...
+    def from_api_response(cls, data: dict) -> RedmineApiModel:
+        """Parse API response dict into model. Override for custom field mappings."""
+        return cls.model_validate(data)
 
 class RedmineUser(RedmineApiModel):
     """Redmine Benutzer."""
@@ -40,12 +34,6 @@ class RedmineUser(RedmineApiModel):
         """Vollständiger Name."""
         return f"{self.firstname or ''} {self.lastname or ''}".strip()
 
-    @classmethod
-    def from_api_response(cls, data: dict) -> RedmineUser:
-        """
-        Validate and parse the API result to a RedmineUser instance
-        """
-        return RedmineUser.model_validate(data)    
 
 class RedmineCustomField(BaseModel):
     """Redmine Custom Field Wert."""
@@ -97,12 +85,6 @@ class RedmineProject(RedmineApiModel):
                     return cf.value
         return None
 
-    @classmethod
-    def from_api_response(cls, data: dict) -> RedmineProject:
-        """
-        Validate and parse the API result to a RedmineProject instance
-        """
-        return RedmineProject.model_validate(data)   
 
 class RedmineTimeEntry(RedmineApiModel):
     """Redmine Zeiteintrag."""
