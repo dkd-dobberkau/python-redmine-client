@@ -11,9 +11,10 @@ Beispiel:
 
 import logging
 import warnings
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import httpx
 
@@ -85,6 +86,28 @@ class AsyncRedmineClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.close()
+
+    @asynccontextmanager
+    async def impersonate(self, login: str) -> AsyncGenerator["AsyncRedmineClient", None]:
+        """
+        Async Context Manager für User-Impersonation via X-Redmine-Switch-User.
+
+        Erzeugt einen neuen Client der alle Anfragen im Namen des
+        angegebenen Benutzers ausführt. Erfordert einen Admin-API-Key.
+
+        Args:
+            login: Login-Name des Benutzers
+
+        Beispiel:
+            async with client.impersonate("john.doe") as user_client:
+                issues = [i async for i in user_client.get_issues()]
+        """
+        impersonated = AsyncRedmineClient(self.base_url, self.api_key, self.timeout)
+        impersonated.client.headers["X-Redmine-Switch-User"] = login
+        try:
+            yield impersonated
+        finally:
+            await impersonated.close()
 
     # === HTTP Methods ===
 

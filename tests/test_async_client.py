@@ -494,3 +494,44 @@ class TestAsyncAttachments:
         assert issue.id == 999
         request = httpx_mock.get_request()
         assert b'"uploads"' in request.content
+
+
+class TestAsyncImpersonate:
+    """Tests für async User-Impersonation."""
+
+    @pytest.mark.asyncio
+    async def test_impersonate_sets_header(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Impersonierter Client sendet X-Redmine-Switch-User Header."""
+        httpx_mock.add_response(
+            json={"user": {"id": 1, "login": "testuser"}}
+        )
+
+        async with async_client.impersonate("john.doe") as user_client:
+            await user_client.get_current_user()
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert request.headers["X-Redmine-Switch-User"] == "john.doe"
+
+    @pytest.mark.asyncio
+    async def test_impersonate_does_not_affect_original_client(
+        self, async_client: AsyncRedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Original-Client hat keinen X-Redmine-Switch-User Header."""
+        httpx_mock.add_response(
+            json={"user": {"id": 1, "login": "testuser"}}
+        )
+        httpx_mock.add_response(
+            json={"user": {"id": 2, "login": "john.doe"}}
+        )
+
+        async with async_client.impersonate("john.doe") as user_client:
+            await user_client.get_current_user()
+
+        await async_client.get_current_user()
+
+        requests = httpx_mock.get_requests()
+        assert requests[0].headers["X-Redmine-Switch-User"] == "john.doe"
+        assert "X-Redmine-Switch-User" not in requests[1].headers
