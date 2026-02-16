@@ -980,3 +980,42 @@ class TestAttachments:
 
         request = httpx_mock.get_request()
         assert b'"uploads"' in request.content
+
+
+class TestImpersonate:
+    """Tests für User-Impersonation."""
+
+    def test_impersonate_sets_header(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Impersonierter Client sendet X-Redmine-Switch-User Header."""
+        httpx_mock.add_response(
+            json={"user": {"id": 1, "login": "testuser"}}
+        )
+
+        with client.impersonate("john.doe") as user_client:
+            user_client.get_current_user()
+
+        request = httpx_mock.get_request()
+        assert request is not None
+        assert request.headers["X-Redmine-Switch-User"] == "john.doe"
+
+    def test_impersonate_does_not_affect_original_client(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Original-Client hat keinen X-Redmine-Switch-User Header."""
+        httpx_mock.add_response(
+            json={"user": {"id": 1, "login": "testuser"}}
+        )
+        httpx_mock.add_response(
+            json={"user": {"id": 2, "login": "john.doe"}}
+        )
+
+        with client.impersonate("john.doe") as user_client:
+            user_client.get_current_user()
+
+        client.get_current_user()
+
+        requests = httpx_mock.get_requests()
+        assert requests[0].headers["X-Redmine-Switch-User"] == "john.doe"
+        assert "X-Redmine-Switch-User" not in requests[1].headers

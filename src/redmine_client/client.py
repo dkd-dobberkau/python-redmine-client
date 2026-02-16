@@ -11,9 +11,10 @@ Beispiel:
 
 import logging
 import warnings
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 import httpx
 
@@ -85,6 +86,28 @@ class RedmineClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
+
+    @contextmanager
+    def impersonate(self, login: str) -> Generator["RedmineClient", None, None]:
+        """
+        Context Manager für User-Impersonation via X-Redmine-Switch-User.
+
+        Erzeugt einen neuen Client der alle Anfragen im Namen des
+        angegebenen Benutzers ausführt. Erfordert einen Admin-API-Key.
+
+        Args:
+            login: Login-Name des Benutzers
+
+        Beispiel:
+            with client.impersonate("john.doe") as user_client:
+                issues = user_client.get_issues(assigned_to_id="me")
+        """
+        impersonated = RedmineClient(self.base_url, self.api_key, self.timeout)
+        impersonated.client.headers["X-Redmine-Switch-User"] = login
+        try:
+            yield impersonated
+        finally:
+            impersonated.close()
 
     # === HTTP Methods ===
 
