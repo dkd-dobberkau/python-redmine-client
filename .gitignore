@@ -44,6 +44,9 @@ htmlcov/
 # ruff
 .ruff_cache/
 
+# CodeGraph
+.codegraph/
+
 # OS
 .DS_Store
 Thumbs.db
