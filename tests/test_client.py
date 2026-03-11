@@ -13,8 +13,8 @@ from redmine_client import (
 )
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(name="client")
+def create_client():
     """Erstellt einen Test-Client."""
     return RedmineClient("https://redmine.example.com", "test-api-key")
 
@@ -134,7 +134,7 @@ class TestProjects:
             }
         )
 
-        projects = client.get_projects()
+        projects = [item for item in client.get_projects()]
 
         assert len(projects) == 2
         assert projects[0].name == "Project A"
@@ -163,7 +163,7 @@ class TestIssues:
             }
         )
 
-        issues = client.get_issues(assigned_to_id="me", status_id="open")
+        issues = [item for item in client.get_issues(assigned_to_id="me", status_id="open")]
 
         assert len(issues) == 1
         assert issues[0].id == 123
@@ -292,7 +292,7 @@ class TestIssues:
             }
         )
 
-        issue = client.get_issue(100, include_journals=True)
+        issue = client.get_issue(100, include=["journals"])
 
         assert issue.id == 100
         assert issue.journals is not None
@@ -360,7 +360,7 @@ class TestIssues:
             }
         )
 
-        client.get_issue(102, include_journals=True)
+        client.get_issue(102, include=["journals"])
 
         request = httpx_mock.get_request()
         assert request is not None
@@ -481,11 +481,38 @@ class TestPagination:
             }
         )
 
-        issues = client.get_issues()
+        issues = [item for item in client.get_issues()]
 
         assert len(issues) == 150
         assert issues[0].id == 1
         assert issues[149].id == 150
+
+    def test_pagination_multiple_pages_with_offset(
+        self, client: RedmineClient, httpx_mock: HTTPXMock
+    ):
+        """Mehrere Seiten werden automatisch abgerufen."""
+        # Erste Seite
+        httpx_mock.add_response(
+            json={
+                "issues": [{"id": i, "subject": f"Issue {i}"} for i in range(44, 143)],
+                "total_count": 150,
+            }
+        )
+        # Zweite Seite
+        httpx_mock.add_response(
+            json={
+                "issues": [
+                    {"id": i, "subject": f"Issue {i}"} for i in range(143, 151)
+                ],
+                "total_count": 150,
+            }
+        )
+
+        issues = [item for item in client.get_issues(offset=43)]
+
+        assert len(issues) == 107
+        assert issues[0].id == 44
+        assert issues[106].id == 150
 
 
 class TestIncludeParameters:
@@ -550,6 +577,8 @@ class TestIncludeParameters:
             )
 
         request = httpx_mock.get_request()
+        assert request is not None
+
         url_str = str(request.url)
         # journals sollte nur einmal vorkommen
         assert url_str.count("journals") == 1
@@ -568,7 +597,7 @@ class TestIncludeParameters:
                         "filesize": 12345,
                         "content_type": "application/pdf",
                         "description": "Ein Dokument",
-                        "content_url": "https://redmine.example.com/attachments/download/10/doc.pdf",
+                        "content_url": "https://redmine.example.com/attachments/download/1/doc.pdf",
                         "author": {"id": 1, "name": "Test User"},
                         "created_on": "2026-01-20T10:00:00Z",
                     }
@@ -782,6 +811,8 @@ class TestWiki:
         assert page.attachments[0].filename == "diagram.png"
 
         request = httpx_mock.get_request()
+        assert request is not None
+
         assert "include=attachments" in str(request.url)
 
     def test_get_wiki_page_with_parent(
@@ -864,7 +895,7 @@ class TestAttachments:
 
         assert token == "pdf-upload-token"
         request = httpx_mock.get_request()
-        assert request.content == b"PDF content"
+        assert request is not None and request.content == b"PDF content"
         assert "filename=document.pdf" in str(request.url)
 
     def test_get_attachment(self, client: RedmineClient, httpx_mock: HTTPXMock):
@@ -958,6 +989,8 @@ class TestAttachments:
 
         assert issue.id == 999
         request = httpx_mock.get_request()
+
+        assert request is not None
         assert b'"uploads"' in request.content
         assert b'"token"' in request.content
 
@@ -979,4 +1012,4 @@ class TestAttachments:
         )
 
         request = httpx_mock.get_request()
-        assert b'"uploads"' in request.content
+        assert request is not None and b'"uploads"' in request.content
